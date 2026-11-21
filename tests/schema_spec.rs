@@ -2,9 +2,9 @@
 
 use std::str::FromStr;
 
+use jachai::prelude::*;
 use serde::Deserialize;
 use serde_json::json;
-use validator::prelude::*;
 
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 enum UserRole {

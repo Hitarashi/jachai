@@ -1,8 +1,8 @@
 //! Targeted test suite to exercise all internal modules, edge cases, and async methods for maximum test coverage.
 
+use jachai::{coercion::*, prelude::*};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use validator::{coercion::*, prelude::*};
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 struct MockDto {
@@ -167,6 +167,17 @@ fn test_error_and_issue_full_api() {
     // Problem details without instance
     let problem_no_instance = reconstructed.to_problem_details(None);
     assert!(problem_no_instance.get("instance").is_none());
+
+    // UX Helpers: first_message, messages, field_errors
+    assert_eq!(reconstructed.first_message(), Some("m"));
+    assert_eq!(reconstructed.messages(), vec!["m", "m2", "m3"]);
+    let field_errs = reconstructed.field_errors();
+    assert_eq!(field_errs.get("f").unwrap(), &vec!["m".to_string()]);
+    assert_eq!(field_errs.get("f2").unwrap(), &vec!["m2".to_string()]);
+    assert_eq!(field_errs.get("f3").unwrap(), &vec!["m3".to_string()]);
+    assert_eq!(empty_err.first_message(), None);
+    assert!(empty_err.messages().is_empty());
+    assert!(empty_err.field_errors().is_empty());
 }
 
 #[test]
@@ -412,45 +423,4 @@ async fn test_array_and_number_async_and_predicates() {
     assert_eq!(int_neg.validate(&json!(-10)).unwrap(), -10);
     let err_pos = int_neg.validate(&json!(10)).unwrap_err();
     assert_eq!(err_pos.issues()[0].message, "Must be negative");
-}
-
-#[cfg(feature = "router")]
-#[tokio::test]
-async fn test_router_async_and_headers_validation() {
-    use router::{context::HttpContext, request::Request};
-
-    let req = Request::builder()
-        .path("/test")
-        .header("x-app-id", "druto-core")
-        .json(&json!({ "name": "AsyncUser", "score": 88 }))
-        .unwrap()
-        .build();
-
-    let mut ctx = HttpContext::new(req);
-
-    // Validate headers
-    let header_schema = object().field("x-app-id", string().starts_with("druto-"));
-    let headers_val = ctx.validate_headers(&header_schema).unwrap();
-    assert_eq!(headers_val["x-app-id"], "druto-core");
-
-    // Validate body async
-    let body_schema = object().field("name", string()).field("score", integer());
-    let validated_body: MockDto = ctx
-        .validate_body_async(&body_schema.clone().decode_into::<MockDto>())
-        .await
-        .unwrap();
-    assert_eq!(validated_body.name, "AsyncUser");
-    assert_eq!(validated_body.score, 88);
-
-    // Validate request async
-    let req_schema = request().headers(header_schema).body(body_schema);
-
-    let val_req = ctx.validate_request_async(&req_schema).await.unwrap();
-    let decoded_dto: MockDto = val_req.decode_body().unwrap();
-    assert_eq!(decoded_dto.name, "AsyncUser");
-
-    // RouterError from ValidationError
-    let err = ValidationError::single("f", "r", "msg");
-    let router_err: router::RouterError = err.into();
-    assert!(format!("{router_err}").contains("msg"));
 }

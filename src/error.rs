@@ -209,6 +209,33 @@ impl ValidationError {
         self.issues.first()
     }
 
+    /// Returns the human-readable error message of the first validation issue, if present.
+    #[must_use]
+    pub fn first_message(&self) -> Option<&str> {
+        self.issues.first().map(|issue| issue.message.as_str())
+    }
+
+    /// Returns a list of all localized error messages across all validation issues.
+    #[must_use]
+    pub fn messages(&self) -> Vec<&str> {
+        self.issues
+            .iter()
+            .map(|issue| issue.message.as_str())
+            .collect()
+    }
+
+    /// Groups all validation issue messages by their canonical field path.
+    #[must_use]
+    pub fn field_errors(&self) -> BTreeMap<String, Vec<String>> {
+        let mut map = BTreeMap::new();
+        for issue in &self.issues {
+            map.entry(issue.field.clone())
+                .or_insert_with(Vec::new)
+                .push(issue.message.clone());
+        }
+        map
+    }
+
     /// Returns a slice of all validation issues.
     #[must_use]
     pub fn issues(&self) -> &[ValidationIssue] {

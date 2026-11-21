@@ -1,27 +1,29 @@
 [package]
-name = "validator"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-rust-version.workspace = true
+name = "jachai"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.85"
+description = "Universal declarative schema definition, validation, sanitization, and structured error reporting engine for Rust."
+repository = "https://github.com/Hitarashi/jachai"
+readme = "README.md"
+keywords = ["validator", "schema", "validation", "sanitization", "rfc9457"]
+categories = ["development-tools", "web-programming", "data-structures"]
 
 [features]
 default = ["async", "macros"]
 async = ["dep:futures-util"]
 macros = []
-router = ["dep:router", "dep:khonj", "async"]
 
 [dependencies]
 # External Dependencies
-regex = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
+regex = { version = "1.13.2", default-features = false, features = ["std", "perf"] }
+serde = { version = "1.0.229", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1.0.154", default-features = false, features = ["alloc"] }
 
 # Optional Dependencies
-futures-util = { workspace = true, optional = true, features = ["alloc"] }
-khonj = { workspace = true, optional = true }
-router = { workspace = true, optional = true }
+futures-util = { version = "0.3.34", optional = true, default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
-proptest = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
+proptest = "1.12.0"
+tokio = { version = "1.54.1", default-features = false, features = ["macros", "rt-multi-thread"] }

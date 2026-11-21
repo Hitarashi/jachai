@@ -2,8 +2,8 @@
 
 #![cfg(feature = "macros")]
 
+use jachai::prelude::*;
 use serde_json::json;
-use validator::prelude::*;
 
 #[test]
 fn test_declarative_schema_macro_simple() {

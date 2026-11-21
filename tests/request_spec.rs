@@ -1,8 +1,8 @@
 //! Tests for RequestSchema, multi-source HTTP validation, namespacing, and typed extractions.
 
+use jachai::prelude::*;
 use serde::Deserialize;
 use serde_json::json;
-use validator::prelude::*;
 
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 struct UserParams {

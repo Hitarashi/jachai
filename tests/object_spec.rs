@@ -1,8 +1,8 @@
 //! Comprehensive tests for ObjectSchema, unknown field policies, cross-field combinators, and decoding.
 
+use jachai::prelude::*;
 use serde::Deserialize;
 use serde_json::json;
-use validator::prelude::*;
 
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 struct UserProfile {

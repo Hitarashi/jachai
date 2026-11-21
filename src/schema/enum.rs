@@ -94,7 +94,14 @@ where
                 ));
             }
             _ => {
-                let issue = rule_ctx.create_issue("required", RuleParams::new(), inline);
+                let mut params = RuleParams::new();
+                if !self.expected.is_empty() {
+                    params.insert("expected", self.expected.join(", "));
+                } else {
+                    params.insert("expected", "valid enum variant");
+                }
+                params.insert("actual", value.to_string());
+                let issue = rule_ctx.create_issue("enum", params, inline);
                 return Err(ValidationError::single(
                     issue.field,
                     issue.rule,

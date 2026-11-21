@@ -5,9 +5,9 @@
 /// # Examples
 ///
 /// ```rust
-/// use validator::schema;
+/// use jachai::schema;
 ///
-/// let user_schema = validator::schema! {
+/// let user_schema = jachai::schema! {
 ///     username: schema::string().min_len(3).max_len(30),
 ///     email: schema::string().email(),
 ///     age: schema::integer().min(18),
@@ -62,13 +62,13 @@ macro_rules! schema_step {
 /// # Examples
 ///
 /// ```rust
-/// use validator::{request_schema, schema};
+/// use jachai::{request_schema, schema};
 ///
-/// let query_schema = validator::schema! {
+/// let query_schema = jachai::schema! {
 ///     page: schema::integer().min(1),
 /// };
 ///
-/// let body_schema = validator::schema! {
+/// let body_schema = jachai::schema! {
 ///     title: schema::string().min_len(3),
 /// };
 ///

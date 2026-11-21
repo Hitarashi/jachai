@@ -1,8 +1,8 @@
 //! Property-based testing for validator invariants using proptest.
 
+use jachai::prelude::*;
 use proptest::prelude::*;
 use serde_json::json;
-use validator::prelude::*;
 
 proptest! {
     #[test]

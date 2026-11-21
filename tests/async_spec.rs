@@ -7,8 +7,8 @@ mod async_tests {
         atomic::{AtomicUsize, Ordering},
     };
 
+    use jachai::prelude::*;
     use serde_json::json;
-    use validator::prelude::*;
 
     #[tokio::test]
     async fn test_async_string_refine() {

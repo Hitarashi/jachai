@@ -182,8 +182,7 @@ where
         if self.distinct {
             let mut seen = HashSet::new();
             for item in items {
-                let serialized = item.to_string();
-                if !seen.insert(serialized) {
+                if !seen.insert(item) {
                     errors.push(rule_ctx.create_issue("distinct", RuleParams::new(), inline));
                     if self.bail_on_fail {
                         return Err(errors);
@@ -306,8 +305,7 @@ where
             if self.distinct {
                 let mut seen = HashSet::new();
                 for item in items {
-                    let serialized = item.to_string();
-                    if !seen.insert(serialized) {
+                    if !seen.insert(item) {
                         errors.push(rule_ctx.create_issue("distinct", RuleParams::new(), inline));
                         if self.bail_on_fail {
                             return Err(errors);
