@@ -84,14 +84,14 @@ fn test_object_decode_typed() {
         .field("email", string().email().optional());
 
     let input = json!({
-        "username": "druto_user",
+        "username": "valid_user",
         "age": 30,
         "email": "user@example.com",
         "unknown_junk": 999
     });
 
     let profile: UserProfile = s.decode(&input).unwrap();
-    assert_eq!(profile.username, "druto_user");
+    assert_eq!(profile.username, "valid_user");
     assert_eq!(profile.age, 30);
     assert_eq!(profile.email, Some("user@example.com".to_string()));
 }

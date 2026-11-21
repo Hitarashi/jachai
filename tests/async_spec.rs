@@ -109,8 +109,8 @@ mod async_tests {
             headers: json!({}),
             cookies: json!({}),
             body: json!({
-                "username": "druto_engineer",
-                "email": "engineer@druto.dev"
+                "username": "alice",
+                "email": "alice@example.com"
             }),
         };
 
@@ -124,7 +124,7 @@ mod async_tests {
             cookies: json!({}),
             body: json!({
                 "username": "admin",
-                "email": "admin@druto.dev"
+                "email": "admin@example.com"
             }),
         };
 

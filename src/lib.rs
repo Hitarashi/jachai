@@ -40,7 +40,7 @@ pub mod macros;
 pub use context::ValidationContext;
 pub use error::{RuleParams, ValidationError, ValidationIssue};
 pub use messages::{MessagesProvider, SimpleMessagesProvider};
-pub use request::{RequestParts, RequestSchema, ValidatedRequest, request};
+pub use request::{RequestParts, RequestSchema, ValidatedRequest, request, request_schema};
 #[cfg(feature = "async")]
 pub use rule::{AsyncCustomRule, SharedAsyncCustomRule};
 pub use rule::{CustomRule, RuleContext, SharedCustomRule};
@@ -51,14 +51,14 @@ pub use schema::{
 
 /// Convenient prelude module importing essential traits, builders, and types.
 pub mod prelude {
+    #[cfg(feature = "macros")]
+    pub use crate::schema;
     #[cfg(feature = "async")]
     pub use crate::{AsyncCustomRule, SharedAsyncCustomRule};
     pub use crate::{
         CustomRule, MessagesProvider, RequestParts, RequestSchema, RuleContext, RuleParams, Schema,
         SimpleMessagesProvider, UnknownFieldPolicy, ValidatedRequest, ValidationContext,
         ValidationError, ValidationIssue, array, boolean, r#enum, integer, number, object, record,
-        request, string, tuple2, union2,
+        request, request_schema, string, tuple2, union2,
     };
-    #[cfg(feature = "macros")]
-    pub use crate::{request_schema, schema};
 }

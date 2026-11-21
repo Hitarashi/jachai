@@ -292,7 +292,7 @@ async fn test_async_all_schema_types() {
 
     // Transform and Refine async
     let trans_s = string().transform(|s| Ok(s.len()));
-    assert_eq!(trans_s.validate_async(&json!("druto")).await.unwrap(), 5);
+    assert_eq!(trans_s.validate_async(&json!("hello")).await.unwrap(), 5);
 
     let ref_s = integer().refine(|n| *n > 0);
     assert_eq!(ref_s.validate_async(&json!(10)).await.unwrap(), 10);

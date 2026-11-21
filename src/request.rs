@@ -473,3 +473,9 @@ impl RequestSchema {
 pub fn request() -> RequestSchema {
     RequestSchema::new()
 }
+
+/// Helper function to create a new `RequestSchema`.
+#[must_use]
+pub fn request_schema() -> RequestSchema {
+    RequestSchema::new()
+}

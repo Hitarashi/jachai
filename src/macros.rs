@@ -17,9 +17,9 @@
 #[macro_export]
 macro_rules! schema {
     ( $( $tokens:tt )* ) => {{
-        let mut druto_object = $crate::schema::object();
-        $crate::schema_step!(druto_object; $( $tokens )*);
-        druto_object
+        let mut schema_target = $crate::schema::object();
+        $crate::schema_step!(schema_target; $( $tokens )*);
+        schema_target
     }};
 }
 
@@ -80,9 +80,9 @@ macro_rules! schema_step {
 #[macro_export]
 macro_rules! request_schema {
     ( $( $tokens:tt )* ) => {{
-        let mut druto_request = $crate::request::request();
-        $crate::request_schema_step!(druto_request; $( $tokens )*);
-        druto_request
+        let mut request_target = $crate::request::request();
+        $crate::request_schema_step!(request_target; $( $tokens )*);
+        request_target
     }};
 }
 

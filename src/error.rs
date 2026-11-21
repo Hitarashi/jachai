@@ -292,12 +292,12 @@ impl ValidationError {
         serde_json::to_string(&self.to_json_value()).unwrap_or_else(|_| "{}".to_string())
     }
 
-    /// Formats the issues as an RFC 9457 / RFC 7807 Problem Details object.
+    /// Formats the issues as an RFC 9457 Problem Details object.
     ///
     /// Produces:
     /// ```json
     /// {
-    ///   "type": "https://druto.dev/errors/validation",
+    ///   "type": "https://tools.ietf.org/html/rfc9457",
     ///   "title": "Unprocessable Entity",
     ///   "status": 422,
     ///   "detail": "Validation failed for 1 field.",
@@ -331,7 +331,7 @@ impl ValidationError {
         };
 
         let mut doc = serde_json::json!({
-            "type": "https://druto.dev/errors/validation",
+            "type": "https://tools.ietf.org/html/rfc9457",
             "title": "Unprocessable Entity",
             "status": 422,
             "detail": detail_text,

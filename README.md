@@ -42,11 +42,10 @@ jachai = { version = "0.1.0", features = ["async", "macros"] }
 use jachai::prelude::*;
 use serde_json::json;
 
-let user_schema = object([
-    ("username", string().min_len(3).max_len(30).trim()),
-    ("email", string().email().to_lowercase()),
-    ("age", integer().min(18).max(120).optional()),
-]);
+let user_schema = object()
+    .field("username", string().min_len(3).max_len(30).trim())
+    .field("email", string().email().to_lowercase())
+    .optional_field("age", integer().min(18).max(120));
 
 let input = json!({
     "username": "  alice  ",
@@ -73,11 +72,10 @@ struct CreateUserDto {
     age: Option<i64>,
 }
 
-let user_schema = object([
-    ("username", string().min_len(3).trim()),
-    ("email", string().email()),
-    ("age", integer().min(18).optional()),
-]);
+let user_schema = object()
+    .field("username", string().min_len(3).trim())
+    .field("email", string().email())
+    .optional_field("age", integer().min(18));
 
 let input = json!({
     "username": "  bob  ",
@@ -117,11 +115,10 @@ assert!(signup_schema.validate(&input).is_ok());
 use jachai::prelude::*;
 use serde_json::json;
 
-let password_schema = object([
-    ("password", string().min_len(8)),
-    ("password_confirmation", string().min_len(8)),
-])
-.same_as("password_confirmation", "password");
+let password_schema = object()
+    .field("password", string().min_len(8))
+    .field("password_confirmation", string().min_len(8))
+    .same_as("password_confirmation", "password");
 
 let input = json!({
     "password": "secretpassword",
@@ -140,8 +137,8 @@ use jachai::prelude::*;
 use serde_json::json;
 
 let req_schema = request_schema()
-    .query(object([("page", integer().min(1).default(1))]))
-    .body(object([("title", string().min_len(1))]));
+    .query(object().field("page", integer().min(1).default(1)))
+    .body(object().field("title", string().min_len(1)));
 
 let parts = RequestParts::new()
     .with_query(json!({ "page": 2 }))
@@ -160,7 +157,7 @@ When validation fails, `ValidationError` can be serialized directly into RFC 945
 use jachai::prelude::*;
 use serde_json::json;
 
-let s = object([("email", string().email())]);
+let s = object().field("email", string().email());
 let err = s.validate(&json!({ "email": "invalid-email" })).unwrap_err();
 
 let problem_details = err.to_problem_details(Some("/api/v1/users"));

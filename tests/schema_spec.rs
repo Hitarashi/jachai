@@ -131,12 +131,12 @@ fn test_string_ip_validation() {
 fn test_string_predicates_and_regex() {
     let s = string()
         .alpha()
-        .starts_with("dr")
-        .ends_with("to")
-        .contains("ru");
-    assert!(s.validate(&json!("druto")).is_ok());
+        .starts_with("he")
+        .ends_with("lo")
+        .contains("ll");
+    assert!(s.validate(&json!("hello")).is_ok());
 
-    let err_alpha = s.validate(&json!("druto123")).unwrap_err();
+    let err_alpha = s.validate(&json!("hello123")).unwrap_err();
     assert_eq!(err_alpha.issues()[0].rule, "alpha");
 
     let alphanumeric_schema = string().alphanumeric();
@@ -342,11 +342,11 @@ fn test_optional_nullable_and_default_schema() {
 #[test]
 fn test_tuple2_schema() {
     let s = tuple2(string().min_len(2), integer().positive());
-    let (name, score) = s.validate(&json!(["druto", 99])).unwrap();
-    assert_eq!(name, "druto");
+    let (name, score) = s.validate(&json!(["rustacean", 99])).unwrap();
+    assert_eq!(name, "rustacean");
     assert_eq!(score, 99);
 
-    let err_len = s.validate(&json!(["druto"])).unwrap_err();
+    let err_len = s.validate(&json!(["rustacean"])).unwrap_err();
     assert_eq!(err_len.issues()[0].rule, "exact_items");
 
     let err_elements = s.validate(&json!(["d", -5])).unwrap_err();
