@@ -75,6 +75,23 @@ impl SimpleMessagesProvider {
         self.field_overrides.insert(key, template.into());
     }
 
+    /// Looks up an override template for a specific field path and rule, if configured.
+    #[must_use]
+    pub fn get_override_template(&self, field: &str, rule: &str) -> Option<&str> {
+        let field_rule_key = format!("{field}.{rule}");
+        let field_wildcard_key = format!("{field}.*");
+
+        self.field_overrides
+            .get(&field_rule_key)
+            .map(String::as_str)
+            .or_else(|| {
+                self.field_overrides
+                    .get(&field_wildcard_key)
+                    .map(String::as_str)
+            })
+            .or_else(|| self.rule_defaults.get(rule).map(String::as_str))
+    }
+
     fn init_built_in_defaults(&mut self) {
         let defaults = [
             ("required", "The :field field is required."),

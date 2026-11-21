@@ -14,6 +14,44 @@ use crate::{
     schema::Schema,
 };
 
+/// Discrete source components of an incoming HTTP request envelope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestPartKind {
+    /// Route parameters (e.g. `:id`, `:slug`).
+    Params = 0,
+    /// Query string parameters parsed as structured values.
+    Query = 1,
+    /// Request headers represented as a map.
+    Headers = 2,
+    /// Request cookies represented as a map.
+    Cookies = 3,
+    /// Request body payload (JSON, Form, or text).
+    Body = 4,
+}
+
+impl RequestPartKind {
+    /// Array of all request part kinds in deterministic pipeline evaluation order.
+    pub const ALL: [Self; 5] = [
+        Self::Params,
+        Self::Query,
+        Self::Headers,
+        Self::Cookies,
+        Self::Body,
+    ];
+
+    /// Returns the canonical path namespace prefix for this request part.
+    #[must_use]
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Self::Params => "params",
+            Self::Query => "query",
+            Self::Headers => "headers",
+            Self::Cookies => "cookies",
+            Self::Body => "body",
+        }
+    }
+}
+
 /// Raw or partially structured parts of an incoming HTTP request.
 #[derive(Debug, Clone, Default)]
 pub struct RequestParts {
@@ -70,6 +108,18 @@ impl RequestParts {
         self.body = body.into();
         self
     }
+
+    /// Retrieves a reference to the request component matching `kind`.
+    #[must_use]
+    pub fn get_part(&self, kind: RequestPartKind) -> &Value {
+        match kind {
+            RequestPartKind::Params => &self.params,
+            RequestPartKind::Query => &self.query,
+            RequestPartKind::Headers => &self.headers,
+            RequestPartKind::Cookies => &self.cookies,
+            RequestPartKind::Body => &self.body,
+        }
+    }
 }
 
 /// Output bundle containing validated components of a multi-source HTTP request.
@@ -88,39 +138,62 @@ pub struct ValidatedRequest {
 }
 
 impl ValidatedRequest {
+    /// Sets a validated component by part kind.
+    pub fn set_part(&mut self, kind: RequestPartKind, value: Value) {
+        match kind {
+            RequestPartKind::Params => self.params = Some(value),
+            RequestPartKind::Query => self.query = Some(value),
+            RequestPartKind::Headers => self.headers = Some(value),
+            RequestPartKind::Cookies => self.cookies = Some(value),
+            RequestPartKind::Body => self.body = Some(value),
+        }
+    }
+
+    /// Returns a reference to the validated component matching `kind`.
+    #[must_use]
+    pub fn get_part(&self, kind: RequestPartKind) -> Option<&Value> {
+        match kind {
+            RequestPartKind::Params => self.params.as_ref(),
+            RequestPartKind::Query => self.query.as_ref(),
+            RequestPartKind::Headers => self.headers.as_ref(),
+            RequestPartKind::Cookies => self.cookies.as_ref(),
+            RequestPartKind::Body => self.body.as_ref(),
+        }
+    }
+
+    /// Deserializes a validated request component into `T: DeserializeOwned`.
+    pub fn decode_part<T: DeserializeOwned>(
+        &self,
+        kind: RequestPartKind,
+    ) -> Result<T, ValidationError> {
+        let val = self.get_part(kind).unwrap_or(&Value::Null);
+        serde_json::from_value(val.clone())
+            .map_err(|err| ValidationError::single(kind.name(), "deserialization", err.to_string()))
+    }
+
     /// Deserializes the validated body into `T: DeserializeOwned`.
     pub fn decode_body<T: DeserializeOwned>(&self) -> Result<T, ValidationError> {
-        let val = self.body.as_ref().unwrap_or(&Value::Null);
-        serde_json::from_value(val.clone())
-            .map_err(|err| ValidationError::single("body", "deserialization", err.to_string()))
+        self.decode_part(RequestPartKind::Body)
     }
 
     /// Deserializes the validated query parameters into `T: DeserializeOwned`.
     pub fn decode_query<T: DeserializeOwned>(&self) -> Result<T, ValidationError> {
-        let val = self.query.as_ref().unwrap_or(&Value::Null);
-        serde_json::from_value(val.clone())
-            .map_err(|err| ValidationError::single("query", "deserialization", err.to_string()))
+        self.decode_part(RequestPartKind::Query)
     }
 
     /// Deserializes the validated route parameters into `T: DeserializeOwned`.
     pub fn decode_params<T: DeserializeOwned>(&self) -> Result<T, ValidationError> {
-        let val = self.params.as_ref().unwrap_or(&Value::Null);
-        serde_json::from_value(val.clone())
-            .map_err(|err| ValidationError::single("params", "deserialization", err.to_string()))
+        self.decode_part(RequestPartKind::Params)
     }
 
     /// Deserializes the validated headers into `T: DeserializeOwned`.
     pub fn decode_headers<T: DeserializeOwned>(&self) -> Result<T, ValidationError> {
-        let val = self.headers.as_ref().unwrap_or(&Value::Null);
-        serde_json::from_value(val.clone())
-            .map_err(|err| ValidationError::single("headers", "deserialization", err.to_string()))
+        self.decode_part(RequestPartKind::Headers)
     }
 
     /// Deserializes the validated cookies into `T: DeserializeOwned`.
     pub fn decode_cookies<T: DeserializeOwned>(&self) -> Result<T, ValidationError> {
-        let val = self.cookies.as_ref().unwrap_or(&Value::Null);
-        serde_json::from_value(val.clone())
-            .map_err(|err| ValidationError::single("cookies", "deserialization", err.to_string()))
+        self.decode_part(RequestPartKind::Cookies)
     }
 }
 
@@ -189,11 +262,7 @@ where
 /// Composite request schema coordinating validation across query, params, headers, cookies, and body.
 #[derive(Clone, Default)]
 pub struct RequestSchema {
-    params_schema: Option<Arc<dyn ErasedPartSchema>>,
-    query_schema: Option<Arc<dyn ErasedPartSchema>>,
-    headers_schema: Option<Arc<dyn ErasedPartSchema>>,
-    cookies_schema: Option<Arc<dyn ErasedPartSchema>>,
-    body_schema: Option<Arc<dyn ErasedPartSchema>>,
+    parts: [Option<Arc<dyn ErasedPartSchema>>; 5],
     bail_on_fail: bool,
 }
 
@@ -211,7 +280,7 @@ impl RequestSchema {
         S: Schema<T>,
         T: serde::Serialize + Send + Sync + 'static,
     {
-        self.params_schema = Some(Arc::new(PartEntry {
+        self.parts[RequestPartKind::Params as usize] = Some(Arc::new(PartEntry {
             schema,
             phantom: std::marker::PhantomData,
         }));
@@ -225,7 +294,7 @@ impl RequestSchema {
         S: Schema<T>,
         T: serde::Serialize + Send + Sync + 'static,
     {
-        self.query_schema = Some(Arc::new(PartEntry {
+        self.parts[RequestPartKind::Query as usize] = Some(Arc::new(PartEntry {
             schema,
             phantom: std::marker::PhantomData,
         }));
@@ -239,7 +308,7 @@ impl RequestSchema {
         S: Schema<T>,
         T: serde::Serialize + Send + Sync + 'static,
     {
-        self.headers_schema = Some(Arc::new(PartEntry {
+        self.parts[RequestPartKind::Headers as usize] = Some(Arc::new(PartEntry {
             schema,
             phantom: std::marker::PhantomData,
         }));
@@ -253,7 +322,7 @@ impl RequestSchema {
         S: Schema<T>,
         T: serde::Serialize + Send + Sync + 'static,
     {
-        self.cookies_schema = Some(Arc::new(PartEntry {
+        self.parts[RequestPartKind::Cookies as usize] = Some(Arc::new(PartEntry {
             schema,
             phantom: std::marker::PhantomData,
         }));
@@ -267,7 +336,7 @@ impl RequestSchema {
         S: Schema<T>,
         T: serde::Serialize + Send + Sync + 'static,
     {
-        self.body_schema = Some(Arc::new(PartEntry {
+        self.parts[RequestPartKind::Body as usize] = Some(Arc::new(PartEntry {
             schema,
             phantom: std::marker::PhantomData,
         }));
@@ -297,61 +366,16 @@ impl RequestSchema {
         let mut errors = ValidationError::new();
         let mut validated = ValidatedRequest::default();
 
-        if let Some(schema) = &self.params_schema {
-            match schema.validate_part(&parts.params, "params", context, &messages) {
-                Ok(val) => validated.params = Some(val),
-                Err(err) => {
-                    errors.merge(err);
-                    if self.bail_on_fail {
-                        return Err(errors);
-                    }
-                }
-            }
-        }
-
-        if let Some(schema) = &self.query_schema {
-            match schema.validate_part(&parts.query, "query", context, &messages) {
-                Ok(val) => validated.query = Some(val),
-                Err(err) => {
-                    errors.merge(err);
-                    if self.bail_on_fail {
-                        return Err(errors);
-                    }
-                }
-            }
-        }
-
-        if let Some(schema) = &self.headers_schema {
-            match schema.validate_part(&parts.headers, "headers", context, &messages) {
-                Ok(val) => validated.headers = Some(val),
-                Err(err) => {
-                    errors.merge(err);
-                    if self.bail_on_fail {
-                        return Err(errors);
-                    }
-                }
-            }
-        }
-
-        if let Some(schema) = &self.cookies_schema {
-            match schema.validate_part(&parts.cookies, "cookies", context, &messages) {
-                Ok(val) => validated.cookies = Some(val),
-                Err(err) => {
-                    errors.merge(err);
-                    if self.bail_on_fail {
-                        return Err(errors);
-                    }
-                }
-            }
-        }
-
-        if let Some(schema) = &self.body_schema {
-            match schema.validate_part(&parts.body, "body", context, &messages) {
-                Ok(val) => validated.body = Some(val),
-                Err(err) => {
-                    errors.merge(err);
-                    if self.bail_on_fail {
-                        return Err(errors);
+        for kind in RequestPartKind::ALL {
+            if let Some(schema) = &self.parts[kind as usize] {
+                let input_val = parts.get_part(kind);
+                match schema.validate_part(input_val, kind.name(), context, &messages) {
+                    Ok(val) => validated.set_part(kind, val),
+                    Err(err) => {
+                        errors.merge(err);
+                        if self.bail_on_fail {
+                            return Err(errors);
+                        }
                     }
                 }
             }
@@ -385,76 +409,19 @@ impl RequestSchema {
         let mut errors = ValidationError::new();
         let mut validated = ValidatedRequest::default();
 
-        if let Some(schema) = &self.params_schema {
-            match schema
-                .validate_async_part(&parts.params, "params", context, &messages)
-                .await
-            {
-                Ok(val) => validated.params = Some(val),
-                Err(err) => {
-                    errors.merge(err);
-                    if self.bail_on_fail {
-                        return Err(errors);
-                    }
-                }
-            }
-        }
-
-        if let Some(schema) = &self.query_schema {
-            match schema
-                .validate_async_part(&parts.query, "query", context, &messages)
-                .await
-            {
-                Ok(val) => validated.query = Some(val),
-                Err(err) => {
-                    errors.merge(err);
-                    if self.bail_on_fail {
-                        return Err(errors);
-                    }
-                }
-            }
-        }
-
-        if let Some(schema) = &self.headers_schema {
-            match schema
-                .validate_async_part(&parts.headers, "headers", context, &messages)
-                .await
-            {
-                Ok(val) => validated.headers = Some(val),
-                Err(err) => {
-                    errors.merge(err);
-                    if self.bail_on_fail {
-                        return Err(errors);
-                    }
-                }
-            }
-        }
-
-        if let Some(schema) = &self.cookies_schema {
-            match schema
-                .validate_async_part(&parts.cookies, "cookies", context, &messages)
-                .await
-            {
-                Ok(val) => validated.cookies = Some(val),
-                Err(err) => {
-                    errors.merge(err);
-                    if self.bail_on_fail {
-                        return Err(errors);
-                    }
-                }
-            }
-        }
-
-        if let Some(schema) = &self.body_schema {
-            match schema
-                .validate_async_part(&parts.body, "body", context, &messages)
-                .await
-            {
-                Ok(val) => validated.body = Some(val),
-                Err(err) => {
-                    errors.merge(err);
-                    if self.bail_on_fail {
-                        return Err(errors);
+        for kind in RequestPartKind::ALL {
+            if let Some(schema) = &self.parts[kind as usize] {
+                let input_val = parts.get_part(kind);
+                match schema
+                    .validate_async_part(input_val, kind.name(), context, &messages)
+                    .await
+                {
+                    Ok(val) => validated.set_part(kind, val),
+                    Err(err) => {
+                        errors.merge(err);
+                        if self.bail_on_fail {
+                            return Err(errors);
+                        }
                     }
                 }
             }

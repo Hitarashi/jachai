@@ -8,7 +8,7 @@ proptest! {
     #[test]
     fn prop_string_length_invariants(s in "\\PC{0,50}") {
         let char_count = s.chars().count();
-        let schema = string().min_len(5).max_len(20);
+        let schema = string().without_trim().min_len(5).max_len(20);
         let value = json!(s);
 
         if (5..=20).contains(&char_count) {

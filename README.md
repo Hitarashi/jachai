@@ -11,7 +11,7 @@ Universal declarative schema definition, validation, sanitization, and structure
 - **Declarative Schema Definitions**: Rich fluent schema types for primitives (`string`, `integer`, `number`, `boolean`), collections (`array`, `record`), composite records (`object`, `tuple2`, `tuple3`), unions, and enums.
 - **In-Place Sanitization**: Mutate and normalize inputs during validation with `.trim()`, `.to_lowercase()`, `.to_uppercase()`, and `.empty_to_null()`.
 - **Object Policies & Decoding**: Configurable handling of unknown fields (`Strip`, `Strict`, `Passthrough`) with direct strongly-typed decoding into target structs via `.validate_and_decode::<T>(&value)`.
-- **Cross-Field Validations**: Express inter-field relationships on objects with `.same_as()`, `.different_from()`, `.required_if()`, `.required_without()`, `.after_date()`, and `.before_date()`.
+- **Cross-Field Validations**: Define inter-field relationships on objects with `.same_as()`, `.different_from()`, `.required_if()`, `.required_without()`, `.after_date()`, and `.before_date()`.
 - **Multi-Source Request Validation**: Coordinate validation across discrete input components (`params`, `query`, `body`, `headers`, `cookies`) with automatic error path prefixing via `RequestSchema`.
 - **Standardized Error Reporting**: Machine-readable `ValidationIssue` collections with exact paths, rule names, parameters, and built-in RFC 9457 Problem Details formatting.
 - **Convenient Developer Accessors**: Rapid issue inspection via `.first_message()`, `.messages()`, and `.field_errors()`.
@@ -43,7 +43,7 @@ use jachai::prelude::*;
 use serde_json::json;
 
 let user_schema = object()
-    .field("username", string().min_len(3).max_len(30).trim())
+    .field("username", string().min_len(3).max_len(30).trim(true))
     .field("email", string().email().to_lowercase())
     .optional_field("age", integer().min(18).max(120));
 
@@ -73,7 +73,7 @@ struct CreateUserDto {
 }
 
 let user_schema = object()
-    .field("username", string().min_len(3).trim())
+    .field("username", string().min_len(3).trim(true))
     .field("email", string().email())
     .optional_field("age", integer().min(18));
 
@@ -96,7 +96,7 @@ use jachai::prelude::*;
 use serde_json::json;
 
 let signup_schema = schema! {
-    email: string().email().trim(),
+    email: string().email().trim(true),
     password: string().min_len(8),
     age?: integer().min(18),
 };
@@ -127,7 +127,10 @@ let input = json!({
 
 let err = password_schema.validate(&input).unwrap_err();
 assert_eq!(err.first_issue().unwrap().rule, "same_as");
-assert_eq!(err.first_message(), Some("Field must match password"));
+assert_eq!(
+    err.first_message(),
+    Some("The password confirmation and password fields must match.")
+);
 ```
 
 ### Multi-Source Request Validation

@@ -136,3 +136,373 @@ where
         })
     }
 }
+
+/// 3-variant union schema combinator returning `T` if `S1`, `S2`, or `S3` passes.
+#[derive(Clone)]
+pub struct Union3Schema<S1, S2, S3, T> {
+    first: S1,
+    second: S2,
+    third: S3,
+    inline_message: Option<String>,
+    phantom: std::marker::PhantomData<T>,
+}
+
+impl<S1, S2, S3, T> Union3Schema<S1, S2, S3, T>
+where
+    S1: Schema<T>,
+    S2: Schema<T>,
+    S3: Schema<T>,
+{
+    /// Creates a new `Union3Schema`.
+    #[must_use]
+    pub fn new(first: S1, second: S2, third: S3) -> Self {
+        Self {
+            first,
+            second,
+            third,
+            inline_message: None,
+            phantom: std::marker::PhantomData,
+        }
+    }
+
+    /// Sets an inline custom message override.
+    #[must_use]
+    pub fn with_message(mut self, message: impl Into<String>) -> Self {
+        self.inline_message = Some(message.into());
+        self
+    }
+}
+
+impl<S1, S2, S3, T> Schema<T> for Union3Schema<S1, S2, S3, T>
+where
+    S1: Schema<T>,
+    S2: Schema<T>,
+    S3: Schema<T>,
+    T: Send + Sync + 'static,
+{
+    fn validate_path(
+        &self,
+        value: &Value,
+        path: &str,
+        context: &ValidationContext,
+        parent_data: Option<&Value>,
+        messages: &dyn MessagesProvider,
+    ) -> Result<T, ValidationError> {
+        let first_err = match self
+            .first
+            .validate_path(value, path, context, parent_data, messages)
+        {
+            Ok(val) => return Ok(val),
+            Err(err) => err,
+        };
+
+        let second_err =
+            match self
+                .second
+                .validate_path(value, path, context, parent_data, messages)
+            {
+                Ok(val) => return Ok(val),
+                Err(err) => err,
+            };
+
+        let third_err = match self
+            .third
+            .validate_path(value, path, context, parent_data, messages)
+        {
+            Ok(val) => return Ok(val),
+            Err(err) => err,
+        };
+
+        let rule_ctx = RuleContext::new(path, context, parent_data, messages);
+        let mut combined = first_err;
+        combined.merge(second_err);
+        combined.merge(third_err);
+
+        if let Some(msg) = &self.inline_message {
+            let issue = rule_ctx.create_issue("union", RuleParams::new(), Some(msg));
+            Err(ValidationError::single(
+                issue.field,
+                issue.rule,
+                issue.message,
+            ))
+        } else {
+            Err(combined)
+        }
+    }
+
+    #[cfg(feature = "async")]
+    fn validate_async_path<'a>(
+        &'a self,
+        value: &'a Value,
+        path: &'a str,
+        context: &'a ValidationContext,
+        parent_data: Option<&'a Value>,
+        messages: &'a dyn MessagesProvider,
+    ) -> BoxFuture<'a, Result<T, ValidationError>> {
+        Box::pin(async move {
+            let first_err = match self
+                .first
+                .validate_async_path(value, path, context, parent_data, messages)
+                .await
+            {
+                Ok(val) => return Ok(val),
+                Err(err) => err,
+            };
+
+            let second_err = match self
+                .second
+                .validate_async_path(value, path, context, parent_data, messages)
+                .await
+            {
+                Ok(val) => return Ok(val),
+                Err(err) => err,
+            };
+
+            let third_err = match self
+                .third
+                .validate_async_path(value, path, context, parent_data, messages)
+                .await
+            {
+                Ok(val) => return Ok(val),
+                Err(err) => err,
+            };
+
+            let rule_ctx = RuleContext::new(path, context, parent_data, messages);
+            let mut combined = first_err;
+            combined.merge(second_err);
+            combined.merge(third_err);
+
+            if let Some(msg) = &self.inline_message {
+                let issue = rule_ctx.create_issue("union", RuleParams::new(), Some(msg));
+                Err(ValidationError::single(
+                    issue.field,
+                    issue.rule,
+                    issue.message,
+                ))
+            } else {
+                Err(combined)
+            }
+        })
+    }
+}
+
+/// 4-variant union schema combinator returning `T` if `S1`, `S2`, `S3`, or `S4` passes.
+#[derive(Clone)]
+pub struct Union4Schema<S1, S2, S3, S4, T> {
+    first: S1,
+    second: S2,
+    third: S3,
+    fourth: S4,
+    inline_message: Option<String>,
+    phantom: std::marker::PhantomData<T>,
+}
+
+impl<S1, S2, S3, S4, T> Union4Schema<S1, S2, S3, S4, T>
+where
+    S1: Schema<T>,
+    S2: Schema<T>,
+    S3: Schema<T>,
+    S4: Schema<T>,
+{
+    /// Creates a new `Union4Schema`.
+    #[must_use]
+    pub fn new(first: S1, second: S2, third: S3, fourth: S4) -> Self {
+        Self {
+            first,
+            second,
+            third,
+            fourth,
+            inline_message: None,
+            phantom: std::marker::PhantomData,
+        }
+    }
+
+    /// Sets an inline custom message override.
+    #[must_use]
+    pub fn with_message(mut self, message: impl Into<String>) -> Self {
+        self.inline_message = Some(message.into());
+        self
+    }
+}
+
+impl<S1, S2, S3, S4, T> Schema<T> for Union4Schema<S1, S2, S3, S4, T>
+where
+    S1: Schema<T>,
+    S2: Schema<T>,
+    S3: Schema<T>,
+    S4: Schema<T>,
+    T: Send + Sync + 'static,
+{
+    fn validate_path(
+        &self,
+        value: &Value,
+        path: &str,
+        context: &ValidationContext,
+        parent_data: Option<&Value>,
+        messages: &dyn MessagesProvider,
+    ) -> Result<T, ValidationError> {
+        let first_err = match self
+            .first
+            .validate_path(value, path, context, parent_data, messages)
+        {
+            Ok(val) => return Ok(val),
+            Err(err) => err,
+        };
+
+        let second_err =
+            match self
+                .second
+                .validate_path(value, path, context, parent_data, messages)
+            {
+                Ok(val) => return Ok(val),
+                Err(err) => err,
+            };
+
+        let third_err = match self
+            .third
+            .validate_path(value, path, context, parent_data, messages)
+        {
+            Ok(val) => return Ok(val),
+            Err(err) => err,
+        };
+
+        let fourth_err =
+            match self
+                .fourth
+                .validate_path(value, path, context, parent_data, messages)
+            {
+                Ok(val) => return Ok(val),
+                Err(err) => err,
+            };
+
+        let rule_ctx = RuleContext::new(path, context, parent_data, messages);
+        let mut combined = first_err;
+        combined.merge(second_err);
+        combined.merge(third_err);
+        combined.merge(fourth_err);
+
+        if let Some(msg) = &self.inline_message {
+            let issue = rule_ctx.create_issue("union", RuleParams::new(), Some(msg));
+            Err(ValidationError::single(
+                issue.field,
+                issue.rule,
+                issue.message,
+            ))
+        } else {
+            Err(combined)
+        }
+    }
+
+    #[cfg(feature = "async")]
+    fn validate_async_path<'a>(
+        &'a self,
+        value: &'a Value,
+        path: &'a str,
+        context: &'a ValidationContext,
+        parent_data: Option<&'a Value>,
+        messages: &'a dyn MessagesProvider,
+    ) -> BoxFuture<'a, Result<T, ValidationError>> {
+        Box::pin(async move {
+            let first_err = match self
+                .first
+                .validate_async_path(value, path, context, parent_data, messages)
+                .await
+            {
+                Ok(val) => return Ok(val),
+                Err(err) => err,
+            };
+
+            let second_err = match self
+                .second
+                .validate_async_path(value, path, context, parent_data, messages)
+                .await
+            {
+                Ok(val) => return Ok(val),
+                Err(err) => err,
+            };
+
+            let third_err = match self
+                .third
+                .validate_async_path(value, path, context, parent_data, messages)
+                .await
+            {
+                Ok(val) => return Ok(val),
+                Err(err) => err,
+            };
+
+            let fourth_err = match self
+                .fourth
+                .validate_async_path(value, path, context, parent_data, messages)
+                .await
+            {
+                Ok(val) => return Ok(val),
+                Err(err) => err,
+            };
+
+            let rule_ctx = RuleContext::new(path, context, parent_data, messages);
+            let mut combined = first_err;
+            combined.merge(second_err);
+            combined.merge(third_err);
+            combined.merge(fourth_err);
+
+            if let Some(msg) = &self.inline_message {
+                let issue = rule_ctx.create_issue("union", RuleParams::new(), Some(msg));
+                Err(ValidationError::single(
+                    issue.field,
+                    issue.rule,
+                    issue.message,
+                ))
+            } else {
+                Err(combined)
+            }
+        })
+    }
+}
+
+/// Creates a binary union schema builder.
+#[must_use]
+pub fn union2<S1, S2, T>(first: S1, second: S2) -> Union2Schema<S1, S2, T>
+where
+    S1: Schema<T>,
+    S2: Schema<T>,
+{
+    Union2Schema::new(first, second)
+}
+
+/// Creates a 3-variant union schema builder.
+#[must_use]
+pub fn union3<S1, S2, S3, T>(first: S1, second: S2, third: S3) -> Union3Schema<S1, S2, S3, T>
+where
+    S1: Schema<T>,
+    S2: Schema<T>,
+    S3: Schema<T>,
+{
+    Union3Schema::new(first, second, third)
+}
+
+/// Creates a 4-variant union schema builder.
+#[must_use]
+pub fn union4<S1, S2, S3, S4, T>(
+    first: S1,
+    second: S2,
+    third: S3,
+    fourth: S4,
+) -> Union4Schema<S1, S2, S3, S4, T>
+where
+    S1: Schema<T>,
+    S2: Schema<T>,
+    S3: Schema<T>,
+    S4: Schema<T>,
+{
+    Union4Schema::new(first, second, third, fourth)
+}
+
+/// Creates a binary union schema builder (ergonomic alias for `union2`).
+#[must_use]
+pub fn union<S1, S2, T>(first: S1, second: S2) -> Union2Schema<S1, S2, T>
+where
+    S1: Schema<T>,
+    S2: Schema<T>,
+{
+    union2(first, second)
+}

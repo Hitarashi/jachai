@@ -76,11 +76,23 @@ impl<'a> RuleContext<'a> {
         params: RuleParams,
         inline_override: Option<&str>,
     ) -> ValidationIssue {
+        self.create_issue_at(self.path, rule, params, inline_override)
+    }
+
+    /// Formats a validation issue at a specific field path using the active message provider.
+    #[must_use]
+    pub fn create_issue_at(
+        &self,
+        field_path: &str,
+        rule: &str,
+        params: RuleParams,
+        inline_override: Option<&str>,
+    ) -> ValidationIssue {
         let message = self
             .messages
-            .format_message(self.path, rule, &params, inline_override);
+            .format_message(field_path, rule, &params, inline_override);
         ValidationIssue {
-            field: self.path.to_string(),
+            field: field_path.to_string(),
             rule: rule.to_string(),
             message,
             params,

@@ -24,8 +24,8 @@ pub use record::RecordSchema;
 use serde_json::Value;
 pub use string::StringSchema;
 pub use transform::{MapSchema, RefineSchema, TransformSchema};
-pub use tuple::Tuple2Schema;
-pub use union::Union2Schema;
+pub use tuple::{Tuple2Schema, Tuple3Schema, Tuple4Schema, tuple, tuple2, tuple3, tuple4};
+pub use union::{Union2Schema, Union3Schema, Union4Schema, union, union2, union3, union4};
 
 use crate::{
     context::ValidationContext,
@@ -123,6 +123,17 @@ pub trait Schema<T>: Send + Sync + 'static {
         T: Clone,
     {
         DefaultSchema::new(self, default)
+    }
+
+    /// Provides a fallback default value if the input is `null`.
+    ///
+    /// Alias for [`Schema::default_value`].
+    fn default(self, default: T) -> DefaultSchema<Self, T>
+    where
+        Self: Sized,
+        T: Clone,
+    {
+        self.default_value(default)
     }
 
     /// Transforms the validated result `T` into another type `Out`.
@@ -224,22 +235,11 @@ where
     EnumSchema::new()
 }
 
-/// Creates a 2-element tuple schema builder.
+/// Creates a new enum schema builder parsing strings into `T: FromStr` (ergonomic alias for `r#enum`).
 #[must_use]
-pub fn tuple2<S1, S2, T1, T2>(first: S1, second: S2) -> Tuple2Schema<S1, S2, T1, T2>
+pub fn enum_of<T>() -> EnumSchema<T>
 where
-    S1: Schema<T1>,
-    S2: Schema<T2>,
+    T: std::str::FromStr + Send + Sync + 'static,
 {
-    Tuple2Schema::new(first, second)
-}
-
-/// Creates a binary union schema builder.
-#[must_use]
-pub fn union2<S1, S2, T>(first: S1, second: S2) -> Union2Schema<S1, S2, T>
-where
-    S1: Schema<T>,
-    S2: Schema<T>,
-{
-    Union2Schema::new(first, second)
+    r#enum()
 }

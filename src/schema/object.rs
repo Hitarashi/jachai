@@ -106,6 +106,29 @@ where
     }
 }
 
+struct CompositeMessagesProvider<'a> {
+    local: &'a SimpleMessagesProvider,
+    parent: &'a dyn MessagesProvider,
+}
+
+impl<'a> MessagesProvider for CompositeMessagesProvider<'a> {
+    fn format_message(
+        &self,
+        field: &str,
+        rule: &str,
+        params: &RuleParams,
+        inline_override: Option<&str>,
+    ) -> String {
+        if let Some(inline) = inline_override {
+            return crate::messages::interpolate_placeholders(inline, field, rule, params);
+        }
+        if let Some(template) = self.local.get_override_template(field, rule) {
+            return crate::messages::interpolate_placeholders(template, field, rule, params);
+        }
+        self.parent.format_message(field, rule, params, None)
+    }
+}
+
 #[derive(Clone)]
 enum CrossFieldRule {
     SameAs {
@@ -139,6 +162,197 @@ enum CrossFieldRule {
         other: String,
         custom_message: Option<String>,
     },
+}
+
+impl CrossFieldRule {
+    fn evaluate(
+        &self,
+        map: &Map<String, Value>,
+        path: &str,
+        rule_ctx: &RuleContext<'_>,
+    ) -> Option<ValidationIssue> {
+        match self {
+            Self::SameAs {
+                field,
+                other,
+                custom_message,
+            } => {
+                let val_a = map.get(field).unwrap_or(&Value::Null);
+                let val_b = map.get(other).unwrap_or(&Value::Null);
+                if val_a != val_b {
+                    let full_path = qualify_path(path, field);
+                    let mut params = RuleParams::new();
+                    params.insert("field", field.clone());
+                    params.insert("other", other.clone());
+                    Some(rule_ctx.create_issue_at(
+                        &full_path,
+                        "same_as",
+                        params,
+                        custom_message.as_deref(),
+                    ))
+                } else {
+                    None
+                }
+            }
+            Self::DifferentFrom {
+                field,
+                other,
+                custom_message,
+            } => {
+                let val_a = map.get(field).unwrap_or(&Value::Null);
+                let val_b = map.get(other).unwrap_or(&Value::Null);
+                if !val_a.is_null() && !val_b.is_null() && val_a == val_b {
+                    let full_path = qualify_path(path, field);
+                    let mut params = RuleParams::new();
+                    params.insert("field", field.clone());
+                    params.insert("other", other.clone());
+                    Some(rule_ctx.create_issue_at(
+                        &full_path,
+                        "different_from",
+                        params,
+                        custom_message.as_deref(),
+                    ))
+                } else {
+                    None
+                }
+            }
+            Self::RequiredIf {
+                field,
+                other,
+                expected,
+                custom_message,
+            } => {
+                let dependency = map.get(other).unwrap_or(&Value::Null);
+                if dependency == expected {
+                    let target = map.get(field).unwrap_or(&Value::Null);
+                    let is_missing = target.is_null()
+                        || (target.is_string() && target.as_str().unwrap_or("").trim().is_empty());
+                    if is_missing {
+                        let full_path = qualify_path(path, field);
+                        let mut params = RuleParams::new();
+                        params.insert("field", field.clone());
+                        params.insert("other", other.clone());
+                        params.insert("value", expected.to_string());
+                        Some(rule_ctx.create_issue_at(
+                            &full_path,
+                            "required_if",
+                            params,
+                            custom_message.as_deref(),
+                        ))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            Self::RequiredWithout {
+                field,
+                other,
+                custom_message,
+            } => {
+                let dependency = map.get(other).unwrap_or(&Value::Null);
+                let dependency_is_absent = dependency.is_null()
+                    || (dependency.is_string()
+                        && dependency.as_str().unwrap_or("").trim().is_empty());
+                if dependency_is_absent {
+                    let target = map.get(field).unwrap_or(&Value::Null);
+                    let is_missing = target.is_null()
+                        || (target.is_string() && target.as_str().unwrap_or("").trim().is_empty());
+                    if is_missing {
+                        let full_path = qualify_path(path, field);
+                        let mut params = RuleParams::new();
+                        params.insert("field", field.clone());
+                        params.insert("other", other.clone());
+                        Some(rule_ctx.create_issue_at(
+                            &full_path,
+                            "required_without",
+                            params,
+                            custom_message.as_deref(),
+                        ))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            Self::AfterField {
+                field,
+                other,
+                custom_message,
+            } => {
+                let val_a = map.get(field).unwrap_or(&Value::Null);
+                let val_b = map.get(other).unwrap_or(&Value::Null);
+                if let (Some(sa), Some(sb)) = (val_a.as_str(), val_b.as_str())
+                    && sa <= sb
+                {
+                    let full_path = qualify_path(path, field);
+                    let mut params = RuleParams::new();
+                    params.insert("field", field.clone());
+                    params.insert("target", other.clone());
+                    Some(rule_ctx.create_issue_at(
+                        &full_path,
+                        "after",
+                        params,
+                        custom_message.as_deref(),
+                    ))
+                } else if let (Some(na), Some(nb)) = (val_a.as_f64(), val_b.as_f64())
+                    && na <= nb
+                {
+                    let full_path = qualify_path(path, field);
+                    let mut params = RuleParams::new();
+                    params.insert("field", field.clone());
+                    params.insert("target", other.clone());
+                    Some(rule_ctx.create_issue_at(
+                        &full_path,
+                        "after",
+                        params,
+                        custom_message.as_deref(),
+                    ))
+                } else {
+                    None
+                }
+            }
+            Self::BeforeField {
+                field,
+                other,
+                custom_message,
+            } => {
+                let val_a = map.get(field).unwrap_or(&Value::Null);
+                let val_b = map.get(other).unwrap_or(&Value::Null);
+                if let (Some(sa), Some(sb)) = (val_a.as_str(), val_b.as_str())
+                    && sa >= sb
+                {
+                    let full_path = qualify_path(path, field);
+                    let mut params = RuleParams::new();
+                    params.insert("field", field.clone());
+                    params.insert("target", other.clone());
+                    Some(rule_ctx.create_issue_at(
+                        &full_path,
+                        "before",
+                        params,
+                        custom_message.as_deref(),
+                    ))
+                } else if let (Some(na), Some(nb)) = (val_a.as_f64(), val_b.as_f64())
+                    && na >= nb
+                {
+                    let full_path = qualify_path(path, field);
+                    let mut params = RuleParams::new();
+                    params.insert("field", field.clone());
+                    params.insert("target", other.clone());
+                    Some(rule_ctx.create_issue_at(
+                        &full_path,
+                        "before",
+                        params,
+                        custom_message.as_deref(),
+                    ))
+                } else {
+                    None
+                }
+            }
+        }
+    }
 }
 
 /// Fluent schema builder for validating JSON objects, maps, and domain structures.
@@ -328,6 +542,22 @@ impl ObjectSchema {
         self
     }
 
+    /// Asserts that `field` is temporally after `other`.
+    ///
+    /// Alias for [`ObjectSchema::after_field`].
+    #[must_use]
+    pub fn after_date(self, field: impl Into<String>, other: impl Into<String>) -> Self {
+        self.after_field(field, other)
+    }
+
+    /// Asserts that `field` is temporally before `other`.
+    ///
+    /// Alias for [`ObjectSchema::before_field`].
+    #[must_use]
+    pub fn before_date(self, field: impl Into<String>, other: impl Into<String>) -> Self {
+        self.before_field(field, other)
+    }
+
     /// Validates the payload and decodes directly into a typed struct `T: DeserializeOwned`.
     pub fn decode<T: DeserializeOwned>(&self, value: &Value) -> Result<T, ValidationError> {
         let validated_json = self.validate(value)?;
@@ -335,6 +565,16 @@ impl ObjectSchema {
             let issue = ValidationIssue::new("", "deserialization", err.to_string());
             ValidationError::single(issue.field, issue.rule, issue.message)
         })
+    }
+
+    /// Validates the payload and decodes directly into a typed struct `T: DeserializeOwned`.
+    ///
+    /// Alias for [`ObjectSchema::decode`].
+    pub fn validate_and_decode<T: DeserializeOwned>(
+        &self,
+        value: &Value,
+    ) -> Result<T, ValidationError> {
+        self.decode(value)
     }
 
     /// Converts this `ObjectSchema` into a `Schema<T>` that automatically decodes into `T: DeserializeOwned`.
@@ -370,259 +610,13 @@ impl ObjectSchema {
         map: &Map<String, Value>,
         path: &str,
         errors: &mut ValidationError,
+        rule_ctx: &RuleContext<'_>,
     ) {
         for cross_rule in &self.cross_rules {
-            match cross_rule {
-                CrossFieldRule::SameAs {
-                    field,
-                    other,
-                    custom_message,
-                } => {
-                    let val_a = map.get(field).unwrap_or(&Value::Null);
-                    let val_b = map.get(other).unwrap_or(&Value::Null);
-
-                    if val_a != val_b {
-                        let full_path = qualify_path(path, field);
-                        let mut params = RuleParams::new();
-                        params.insert("field", field.clone());
-                        params.insert("other", other.clone());
-                        let msg = custom_message
-                            .as_deref()
-                            .unwrap_or("The :field and :other fields must match.");
-                        let rendered = crate::messages::interpolate_placeholders(
-                            msg, field, "same_as", &params,
-                        );
-                        errors.push(ValidationIssue {
-                            field: full_path,
-                            rule: "same_as".to_string(),
-                            message: rendered,
-                            params,
-                        });
-                        if self.bail_on_fail {
-                            return;
-                        }
-                    }
-                }
-                CrossFieldRule::DifferentFrom {
-                    field,
-                    other,
-                    custom_message,
-                } => {
-                    let val_a = map.get(field).unwrap_or(&Value::Null);
-                    let val_b = map.get(other).unwrap_or(&Value::Null);
-
-                    if !val_a.is_null() && !val_b.is_null() && val_a == val_b {
-                        let full_path = qualify_path(path, field);
-                        let mut params = RuleParams::new();
-                        params.insert("field", field.clone());
-                        params.insert("other", other.clone());
-                        let msg = custom_message
-                            .as_deref()
-                            .unwrap_or("The :field and :other fields must be different.");
-                        let rendered = crate::messages::interpolate_placeholders(
-                            msg,
-                            field,
-                            "different_from",
-                            &params,
-                        );
-                        errors.push(ValidationIssue {
-                            field: full_path,
-                            rule: "different_from".to_string(),
-                            message: rendered,
-                            params,
-                        });
-                        if self.bail_on_fail {
-                            return;
-                        }
-                    }
-                }
-                CrossFieldRule::RequiredIf {
-                    field,
-                    other,
-                    expected,
-                    custom_message,
-                } => {
-                    let dependency = map.get(other).unwrap_or(&Value::Null);
-                    let matches_dependency = dependency == expected;
-
-                    if matches_dependency {
-                        let target = map.get(field).unwrap_or(&Value::Null);
-                        let is_missing = target.is_null()
-                            || (target.is_string()
-                                && target.as_str().unwrap_or("").trim().is_empty());
-                        if is_missing {
-                            let full_path = qualify_path(path, field);
-                            let mut params = RuleParams::new();
-                            params.insert("field", field.clone());
-                            params.insert("other", other.clone());
-                            params.insert("value", expected.to_string());
-                            let msg = custom_message
-                                .as_deref()
-                                .unwrap_or("The :field field is required when :other is :value.");
-                            let rendered = crate::messages::interpolate_placeholders(
-                                msg,
-                                field,
-                                "required_if",
-                                &params,
-                            );
-                            errors.push(ValidationIssue {
-                                field: full_path,
-                                rule: "required_if".to_string(),
-                                message: rendered,
-                                params,
-                            });
-                            if self.bail_on_fail {
-                                return;
-                            }
-                        }
-                    }
-                }
-                CrossFieldRule::RequiredWithout {
-                    field,
-                    other,
-                    custom_message,
-                } => {
-                    let dependency = map.get(other).unwrap_or(&Value::Null);
-                    let dependency_is_absent = dependency.is_null()
-                        || (dependency.is_string()
-                            && dependency.as_str().unwrap_or("").trim().is_empty());
-
-                    if dependency_is_absent {
-                        let target = map.get(field).unwrap_or(&Value::Null);
-                        let is_missing = target.is_null()
-                            || (target.is_string()
-                                && target.as_str().unwrap_or("").trim().is_empty());
-                        if is_missing {
-                            let full_path = qualify_path(path, field);
-                            let mut params = RuleParams::new();
-                            params.insert("field", field.clone());
-                            params.insert("other", other.clone());
-                            let msg = custom_message
-                                .as_deref()
-                                .unwrap_or("The :field field is required when :other is absent.");
-                            let rendered = crate::messages::interpolate_placeholders(
-                                msg,
-                                field,
-                                "required_without",
-                                &params,
-                            );
-                            errors.push(ValidationIssue {
-                                field: full_path,
-                                rule: "required_without".to_string(),
-                                message: rendered,
-                                params,
-                            });
-                            if self.bail_on_fail {
-                                return;
-                            }
-                        }
-                    }
-                }
-                CrossFieldRule::AfterField {
-                    field,
-                    other,
-                    custom_message,
-                } => {
-                    let val_a = map.get(field).unwrap_or(&Value::Null);
-                    let val_b = map.get(other).unwrap_or(&Value::Null);
-
-                    if let (Some(sa), Some(sb)) = (val_a.as_str(), val_b.as_str())
-                        && sa <= sb
-                    {
-                        let full_path = qualify_path(path, field);
-                        let mut params = RuleParams::new();
-                        params.insert("field", field.clone());
-                        params.insert("target", other.clone());
-                        let msg = custom_message
-                            .as_deref()
-                            .unwrap_or("The :field field must be a date after :target.");
-                        let rendered =
-                            crate::messages::interpolate_placeholders(msg, field, "after", &params);
-                        errors.push(ValidationIssue {
-                            field: full_path,
-                            rule: "after".to_string(),
-                            message: rendered,
-                            params,
-                        });
-                        if self.bail_on_fail {
-                            return;
-                        }
-                    } else if let (Some(na), Some(nb)) = (val_a.as_f64(), val_b.as_f64())
-                        && na <= nb
-                    {
-                        let full_path = qualify_path(path, field);
-                        let mut params = RuleParams::new();
-                        params.insert("field", field.clone());
-                        params.insert("target", other.clone());
-                        let msg = custom_message
-                            .as_deref()
-                            .unwrap_or("The :field field must be greater than :target.");
-                        let rendered =
-                            crate::messages::interpolate_placeholders(msg, field, "after", &params);
-                        errors.push(ValidationIssue {
-                            field: full_path,
-                            rule: "after".to_string(),
-                            message: rendered,
-                            params,
-                        });
-                        if self.bail_on_fail {
-                            return;
-                        }
-                    }
-                }
-                CrossFieldRule::BeforeField {
-                    field,
-                    other,
-                    custom_message,
-                } => {
-                    let val_a = map.get(field).unwrap_or(&Value::Null);
-                    let val_b = map.get(other).unwrap_or(&Value::Null);
-
-                    if let (Some(sa), Some(sb)) = (val_a.as_str(), val_b.as_str())
-                        && sa >= sb
-                    {
-                        let full_path = qualify_path(path, field);
-                        let mut params = RuleParams::new();
-                        params.insert("field", field.clone());
-                        params.insert("target", other.clone());
-                        let msg = custom_message
-                            .as_deref()
-                            .unwrap_or("The :field field must be a date before :target.");
-                        let rendered = crate::messages::interpolate_placeholders(
-                            msg, field, "before", &params,
-                        );
-                        errors.push(ValidationIssue {
-                            field: full_path,
-                            rule: "before".to_string(),
-                            message: rendered,
-                            params,
-                        });
-                        if self.bail_on_fail {
-                            return;
-                        }
-                    } else if let (Some(na), Some(nb)) = (val_a.as_f64(), val_b.as_f64())
-                        && na >= nb
-                    {
-                        let full_path = qualify_path(path, field);
-                        let mut params = RuleParams::new();
-                        params.insert("field", field.clone());
-                        params.insert("target", other.clone());
-                        let msg = custom_message
-                            .as_deref()
-                            .unwrap_or("The :field field must be less than :target.");
-                        let rendered = crate::messages::interpolate_placeholders(
-                            msg, field, "before", &params,
-                        );
-                        errors.push(ValidationIssue {
-                            field: full_path,
-                            rule: "before".to_string(),
-                            message: rendered,
-                            params,
-                        });
-                        if self.bail_on_fail {
-                            return;
-                        }
-                    }
+            if let Some(issue) = cross_rule.evaluate(map, path, rule_ctx) {
+                errors.push(issue);
+                if self.bail_on_fail {
+                    return;
                 }
             }
         }
@@ -638,7 +632,11 @@ impl Schema<Value> for ObjectSchema {
         parent_data: Option<&Value>,
         messages: &dyn MessagesProvider,
     ) -> Result<Value, ValidationError> {
-        let rule_ctx = RuleContext::new(path, context, parent_data, messages);
+        let composite = CompositeMessagesProvider {
+            local: &self.custom_messages,
+            parent: messages,
+        };
+        let rule_ctx = RuleContext::new(path, context, parent_data, &composite);
         let inline = self.inline_message.as_deref();
 
         let map = match value {
@@ -694,13 +692,8 @@ impl Schema<Value> for ObjectSchema {
                 continue;
             }
 
-            match field_def.validate_field(
-                input_val,
-                &field_path,
-                context,
-                Some(value),
-                &self.custom_messages,
-            ) {
+            match field_def.validate_field(input_val, &field_path, context, Some(value), &composite)
+            {
                 Ok(valid_val) => {
                     result_map.insert(field_name.clone(), valid_val);
                 }
@@ -723,7 +716,7 @@ impl Schema<Value> for ObjectSchema {
         }
 
         // 4. Cross-field validation rules
-        self.evaluate_cross_rules(map, path, &mut errors);
+        self.evaluate_cross_rules(map, path, &mut errors, &rule_ctx);
 
         if errors.is_empty() {
             Ok(Value::Object(result_map))
@@ -742,7 +735,11 @@ impl Schema<Value> for ObjectSchema {
         messages: &'a dyn MessagesProvider,
     ) -> BoxFuture<'a, Result<Value, ValidationError>> {
         Box::pin(async move {
-            let rule_ctx = RuleContext::new(path, context, parent_data, messages);
+            let composite = CompositeMessagesProvider {
+                local: &self.custom_messages,
+                parent: messages,
+            };
+            let rule_ctx = RuleContext::new(path, context, parent_data, &composite);
             let inline = self.inline_message.as_deref();
 
             let map = match value {
@@ -797,13 +794,7 @@ impl Schema<Value> for ObjectSchema {
                 }
 
                 match field_def
-                    .validate_async_field(
-                        input_val,
-                        &field_path,
-                        context,
-                        Some(value),
-                        &self.custom_messages,
-                    )
+                    .validate_async_field(input_val, &field_path, context, Some(value), &composite)
                     .await
                 {
                     Ok(valid_val) => {
@@ -826,7 +817,7 @@ impl Schema<Value> for ObjectSchema {
                 }
             }
 
-            self.evaluate_cross_rules(map, path, &mut errors);
+            self.evaluate_cross_rules(map, path, &mut errors, &rule_ctx);
 
             if errors.is_empty() {
                 Ok(Value::Object(result_map))

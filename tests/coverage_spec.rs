@@ -201,7 +201,7 @@ fn test_request_parts_fluent_builders_and_decodes() {
         .with_query(json!({ "q": "search" }))
         .with_headers(json!({ "x-key": "secret" }))
         .with_cookies(json!({ "auth": "token" }))
-        .with_body(json!({ "name": "Druto", "score": 95 }));
+        .with_body(json!({ "name": "Alice", "score": 95 }));
 
     assert_eq!(parts.params["id"], 1);
     assert_eq!(parts.query["q"], "search");
@@ -219,7 +219,7 @@ fn test_request_parts_fluent_builders_and_decodes() {
 
     let validated = req_schema.validate(&parts).unwrap();
     let body: MockDto = validated.decode_body().unwrap();
-    assert_eq!(body.name, "Druto");
+    assert_eq!(body.name, "Alice");
     assert_eq!(body.score, 95);
 
     let decoded_headers: serde_json::Value = validated.decode_headers().unwrap();
@@ -423,4 +423,206 @@ async fn test_array_and_number_async_and_predicates() {
     assert_eq!(int_neg.validate(&json!(-10)).unwrap(), -10);
     let err_pos = int_neg.validate(&json!(10)).unwrap_err();
     assert_eq!(err_pos.issues()[0].message, "Must be negative");
+}
+
+#[cfg(feature = "async")]
+#[tokio::test]
+async fn test_ultimate_coverage_boost() {
+    // 1. ValidationError display with exactly 1 issue
+    let single_err = ValidationError::single("email", "email", "Invalid email format");
+    let display_single = format!("{single_err}");
+    assert!(display_single.contains("Validation error: email: Invalid email format"));
+
+    // 2. RuleParams builder and removal
+    let mut params = RuleParams::new().with("key1", "val1").with("key2", "val2");
+    assert_eq!(params.len(), 2);
+    assert_eq!(params.remove("key1"), Some("val1".to_string()));
+    assert_eq!(params.len(), 1);
+
+    // 3. NumberSchema rule_async and bail
+    struct AsyncNumLimitRule;
+    impl AsyncCustomRule<f64> for AsyncNumLimitRule {
+        fn validate<'a>(
+            &'a self,
+            value: &'a f64,
+            ctx: &'a RuleContext<'a>,
+        ) -> futures_util::future::BoxFuture<'a, Result<(), ValidationIssue>> {
+            Box::pin(async move {
+                if *value > 50.0 {
+                    Err(ValidationIssue::new(
+                        ctx.path(),
+                        "custom_async",
+                        "Too large",
+                    ))
+                } else {
+                    Ok(())
+                }
+            })
+        }
+    }
+
+    let num_async_s = number().min(10.0).bail(true).rule_async(AsyncNumLimitRule);
+    assert_eq!(
+        num_async_s.validate_async(&json!(25.0)).await.unwrap(),
+        25.0
+    );
+    let err_num_async = num_async_s.validate_async(&json!(60.0)).await.unwrap_err();
+    assert_eq!(err_num_async.issues()[0].rule, "custom_async");
+
+    // NumberSchema bail on predicate failure stops before evaluating async rules
+    let err_num_bail = num_async_s.validate_async(&json!(5.0)).await.unwrap_err();
+    assert_eq!(err_num_bail.issues()[0].rule, "min");
+
+    // 4. IntegerSchema multiple_of and with_message
+    let int_mult = integer()
+        .multiple_of(5)
+        .with_message("Multiple of 5 required");
+    assert_eq!(int_mult.validate(&json!(15)).unwrap(), 15);
+    assert_eq!(int_mult.validate_async(&json!(15)).await.unwrap(), 15);
+    let err_int_mult = int_mult.validate(&json!(14)).unwrap_err();
+    assert_eq!(err_int_mult.issues()[0].message, "Multiple of 5 required");
+
+    // 5. RecordSchema sync and async bail, and async invalid types
+    let rec_bail = record(integer().min(10)).bail(true);
+    let err_rec_sync = rec_bail.validate(&json!({ "a": 5, "b": 2 })).unwrap_err();
+    assert_eq!(err_rec_sync.issues().len(), 1);
+
+    let err_rec_async_bail = rec_bail
+        .validate_async(&json!({ "a": 5, "b": 2 }))
+        .await
+        .unwrap_err();
+    assert_eq!(err_rec_async_bail.issues().len(), 1);
+
+    assert!(rec_bail.validate_async(&json!(null)).await.is_err());
+    assert!(rec_bail.validate_async(&json!("not_an_obj")).await.is_err());
+
+    // 6. ArraySchema sync and async bail, and async invalid types
+    let arr_bail = array(integer().min(10)).bail(true);
+    let err_arr_sync = arr_bail.validate(&json!([5, 2])).unwrap_err();
+    assert_eq!(err_arr_sync.issues().len(), 1);
+
+    let err_arr_async_bail = arr_bail.validate_async(&json!([5, 2])).await.unwrap_err();
+    assert_eq!(err_arr_async_bail.issues().len(), 1);
+
+    assert!(arr_bail.validate_async(&json!(null)).await.is_err());
+    assert!(arr_bail.validate_async(&json!("not_an_arr")).await.is_err());
+
+    // 7. Schema::validate_async_with_context
+    let v_ctx = ValidationContext::new();
+    assert_eq!(
+        string()
+            .validate_async_with_context(&json!("hello"), &v_ctx)
+            .await
+            .unwrap(),
+        "hello"
+    );
+    assert_eq!(
+        integer()
+            .validate_async_with_context(&json!(123), &v_ctx)
+            .await
+            .unwrap(),
+        123
+    );
+
+    // 8. EnumSchema variants, bail, with_message, async null & non-string
+    #[derive(Debug, PartialEq, Eq)]
+    enum LocalRole {
+        Admin,
+        Member,
+    }
+
+    impl std::str::FromStr for LocalRole {
+        type Err = &'static str;
+        fn from_str(s: &str) -> Result<Self, Self::Err> {
+            match s {
+                "admin" => Ok(Self::Admin),
+                "member" => Ok(Self::Member),
+                _ => Err("unknown"),
+            }
+        }
+    }
+
+    let enum_s = r#enum::<LocalRole>()
+        .variants(&["admin", "member"])
+        .bail(true)
+        .with_message("Unknown role");
+    assert!(enum_s.validate_async(&json!(null)).await.is_err());
+    assert!(enum_s.validate_async(&json!(123)).await.is_err());
+    assert!(enum_s.validate_async(&json!("invalid_role")).await.is_err());
+    assert_eq!(
+        enum_s.validate_async(&json!("admin")).await.unwrap(),
+        LocalRole::Admin
+    );
+
+    // 9. Coercion standalone helpers: normalize_empty_strings, empty_string_to_null
+    let norm_val = jachai::coercion::normalize_empty_strings(&json!({ "a": "", "b": "val" }));
+    assert_eq!(norm_val["a"], serde_json::Value::Null);
+    assert_eq!(norm_val["b"], "val");
+    assert_eq!(
+        jachai::coercion::empty_string_to_null(&json!("not_empty")),
+        json!("not_empty")
+    );
+    assert_eq!(
+        jachai::coercion::empty_string_to_null(&json!(123)),
+        json!(123)
+    );
+
+    // 10. StringSchema predicates failure coverage: starts_with, ends_with, contains, alpha, alphanumeric, ascii
+    let s_prefix = string().starts_with("pre_");
+    assert!(s_prefix.validate(&json!("bad_prefix")).is_err());
+
+    let s_suffix = string().ends_with("_suf");
+    assert!(s_suffix.validate(&json!("bad_suffix")).is_err());
+
+    let s_contain = string().contains("needle");
+    assert!(s_contain.validate(&json!("haystack")).is_err());
+
+    let s_alpha = string().alpha();
+    assert!(s_alpha.validate(&json!("abc123")).is_err());
+
+    let s_alphanum = string().alphanumeric();
+    assert!(s_alphanum.validate(&json!("abc@123")).is_err());
+
+    let s_ascii = string().ascii();
+    assert!(s_ascii.validate(&json!("hello\u{1F600}")).is_err());
+
+    // 11. String refine_async with inline custom message
+    let s_refine_custom = string()
+        .with_message("Inline refine fail")
+        .refine_async(|candidate| {
+            let _ = candidate;
+            Box::pin(async move { Err("ignored reason".to_string()) })
+        });
+    let err_refine_custom = s_refine_custom
+        .validate_async(&json!("valid_str"))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err_refine_custom.first_message(),
+        Some("Inline refine fail")
+    );
+
+    // 12. RefineSchema with_rule and with_message, async failure
+    let refine_s = integer()
+        .refine(|n| *n > 0)
+        .with_rule("strictly_positive")
+        .with_message("Value must be strictly positive");
+    let err_refine_async = refine_s.validate_async(&json!(-5)).await.unwrap_err();
+    assert_eq!(err_refine_async.issues()[0].rule, "strictly_positive");
+    assert_eq!(
+        err_refine_async.issues()[0].message,
+        "Value must be strictly positive"
+    );
+
+    // 13. TransformSchema async failure
+    let transform_s = integer().transform(|n| {
+        if n == 0 {
+            Err("Cannot be zero".to_string())
+        } else {
+            Ok(n * 2)
+        }
+    });
+    let err_transform_async = transform_s.validate_async(&json!(0)).await.unwrap_err();
+    assert_eq!(err_transform_async.issues()[0].rule, "transform");
+    assert_eq!(err_transform_async.issues()[0].message, "Cannot be zero");
 }

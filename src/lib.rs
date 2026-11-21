@@ -37,16 +37,19 @@ pub mod schema;
 #[cfg(feature = "macros")]
 pub mod macros;
 
+pub use coercion::Coercer;
 pub use context::ValidationContext;
 pub use error::{RuleParams, ValidationError, ValidationIssue};
 pub use messages::{MessagesProvider, SimpleMessagesProvider};
-pub use request::{RequestParts, RequestSchema, ValidatedRequest, request, request_schema};
+pub use request::{
+    RequestPartKind, RequestParts, RequestSchema, ValidatedRequest, request, request_schema,
+};
 #[cfg(feature = "async")]
 pub use rule::{AsyncCustomRule, SharedAsyncCustomRule};
 pub use rule::{CustomRule, RuleContext, SharedCustomRule};
 pub use schema::{
-    Schema, UnknownFieldPolicy, array, boolean, r#enum, integer, number, object, record, string,
-    tuple2, union2,
+    Schema, UnknownFieldPolicy, array, boolean, r#enum, enum_of, integer, number, object, record,
+    string, tuple, tuple2, tuple3, tuple4, union, union2, union3, union4,
 };
 
 /// Convenient prelude module importing essential traits, builders, and types.
@@ -56,9 +59,10 @@ pub mod prelude {
     #[cfg(feature = "async")]
     pub use crate::{AsyncCustomRule, SharedAsyncCustomRule};
     pub use crate::{
-        CustomRule, MessagesProvider, RequestParts, RequestSchema, RuleContext, RuleParams, Schema,
-        SimpleMessagesProvider, UnknownFieldPolicy, ValidatedRequest, ValidationContext,
-        ValidationError, ValidationIssue, array, boolean, r#enum, integer, number, object, record,
-        request, request_schema, string, tuple2, union2,
+        Coercer, CustomRule, MessagesProvider, RequestPartKind, RequestParts, RequestSchema,
+        RuleContext, RuleParams, Schema, SimpleMessagesProvider, UnknownFieldPolicy,
+        ValidatedRequest, ValidationContext, ValidationError, ValidationIssue, array, boolean,
+        r#enum, enum_of, integer, number, object, record, request, request_schema, string, tuple,
+        tuple2, tuple3, tuple4, union, union2, union3, union4,
     };
 }

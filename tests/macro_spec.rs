@@ -13,11 +13,11 @@ fn test_declarative_schema_macro_simple() {
     };
 
     let valid_input = json!({
-        "name": "Druto",
+        "name": "Alice",
         "age": 2
     });
     let result = user_schema.validate(&valid_input).unwrap();
-    assert_eq!(result.get("name").and_then(|v| v.as_str()), Some("Druto"));
+    assert_eq!(result.get("name").and_then(|v| v.as_str()), Some("Alice"));
     assert_eq!(result.get("age").and_then(|v| v.as_i64()), Some(2));
 
     let invalid_input = json!({

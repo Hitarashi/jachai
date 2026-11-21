@@ -60,6 +60,8 @@ pub struct StringSchema {
     predicates: Vec<StringPredicate>,
     should_trim: bool,
     empty_as_null: bool,
+    to_lower: bool,
+    to_upper: bool,
     bail_on_fail: bool,
     inline_message: Option<String>,
     #[cfg(feature = "async")]
@@ -80,6 +82,8 @@ impl StringSchema {
             predicates: Vec::new(),
             should_trim: true,
             empty_as_null: false,
+            to_lower: false,
+            to_upper: false,
             bail_on_fail: false,
             inline_message: None,
             #[cfg(feature = "async")]
@@ -94,10 +98,41 @@ impl StringSchema {
         self
     }
 
+    /// Disables automatic whitespace trimming.
+    #[must_use]
+    pub fn without_trim(mut self) -> Self {
+        self.should_trim = false;
+        self
+    }
+
     /// Configures whether empty strings should be treated as null (default: `false`).
     #[must_use]
     pub fn empty_string_as_null(mut self, enabled: bool) -> Self {
         self.empty_as_null = enabled;
+        self
+    }
+
+    /// Treats empty strings `""` as null.
+    ///
+    /// Alias for `empty_string_as_null(true)`.
+    #[must_use]
+    pub fn empty_to_null(self) -> Self {
+        self.empty_string_as_null(true)
+    }
+
+    /// Converts the validated string to lowercase.
+    #[must_use]
+    pub fn to_lowercase(mut self) -> Self {
+        self.to_lower = true;
+        self.to_upper = false;
+        self
+    }
+
+    /// Converts the validated string to uppercase.
+    #[must_use]
+    pub fn to_uppercase(mut self) -> Self {
+        self.to_upper = true;
+        self.to_lower = false;
         self
     }
 
@@ -481,6 +516,12 @@ impl Schema<String> for StringSchema {
         let mut processed = initial_string;
         if self.should_trim {
             processed = trim_whitespace(&processed).to_string();
+        }
+
+        if self.to_lower {
+            processed = processed.to_lowercase();
+        } else if self.to_upper {
+            processed = processed.to_uppercase();
         }
 
         if self.empty_as_null && processed.is_empty() {

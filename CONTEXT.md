@@ -18,16 +18,17 @@ paths, sanitize inputs in-place, and format violations into RFC 9457 compliant e
 
 1. **Declarative Schema Definitions**:
     - Primitives: `string()`, `integer()`, `number()`, `boolean()`.
-    - Combinators: `array()`, `object()`, `record()`, `tuple2()`, `tuple3()`, `union2()`, `union3()`, `enum_of()`.
+    - Combinators: `array()`, `object()`, `record()`, `tuple()` (`tuple2()`, `tuple3()`, `tuple4()`), `union()` (`union2()`, `union3()`, `union4()`), `enum_of()` (`r#enum()`).
     - Modifiers: `.optional()`, `.nullable()`, `.default(v)`, `.bail(bool)`, `.transform(f)`, `.refine(f)`.
 2. **Input Sanitization & Transformations**:
-    - String mutations: `.trim()`, `.to_lowercase()`, `.to_uppercase()`, `.empty_to_null()`.
+    - `Coercer` engine: configurable in-place tree sanitization with zero allocations (`Coercer::sanitize_in_place`, `Coercer::to_bool`, `Coercer::to_number`, etc.).
+    - String mutations: `.trim()`, `.without_trim()`, `.to_lowercase()`, `.to_uppercase()`, `.empty_to_null()`.
     - Object unknown-field policies: `Strip` (default), `Strict` (rejects excess keys), and `Passthrough`.
     - Type decoding: `.validate_and_decode::<T>(&value)` deserializes valid and sanitized data directly into target structs.
 3. **Cross-Field Validations**:
     - Cross-field rules on objects: `.same_as()`, `.different_from()`, `.required_if()`, `.required_without()`, `.after_date()`, `.before_date()`.
 4. **Multi-Source Request Validation**:
-    - `RequestSchema` and `RequestParts` validate separate input sources (`params`, `query`, `body`, `headers`, `cookies`) with automatic path prefixing (e.g. `query.page`, `body.user.email`).
+    - `RequestSchema`, `RequestParts`, and `RequestPartKind` validate separate input sources (`params`, `query`, `body`, `headers`, `cookies`) with unified dispatch and automatic path prefixing (e.g. `query.page`, `body.user.email`).
 5. **Structured Error Reporting**:
     - `ValidationError` collection with `ValidationIssue` entries.
     - Developer convenience accessors: `.first_message()`, `.messages()`, `.field_errors()`.
