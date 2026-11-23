@@ -3015,3 +3015,1983 @@ async fn test_new_rules_and_granular_features_full_coverage() {
     assert!(time_schema.validate(&json!("12:30:00+25:00")).is_err());
     assert!(time_schema.validate(&json!("12:30:00+05:65")).is_err());
 }
+
+#[tokio::test]
+async fn test_coverage_zero_alloc_check_and_in_place_paths() {
+    // 1. Error & RuleParams serialization, deserialization, iter, insert overwrite, remove missing
+    let mut params = RuleParams::new();
+    params.insert("field", "username");
+    params.insert("field", "user_id"); // overwrite
+    params.insert("min", "5");
+    assert_eq!(params.get("field"), Some("user_id"));
+    assert_eq!(params.remove("nonexistent"), None);
+    assert_eq!(params.remove("min"), Some("5".to_string()));
+    assert_eq!(params.iter().count(), 1);
+
+    let serialized = serde_json::to_string(&params).unwrap();
+    assert!(serialized.contains("user_id"));
+    let deserialized: RuleParams = serde_json::from_str(&serialized).unwrap();
+    assert_eq!(deserialized.get("field"), Some("user_id"));
+    assert!(serde_json::from_str::<RuleParams>("123").is_err());
+
+    // 2. Boolean check, check_bool, validate_bool, check_path
+    let bool_s = boolean();
+    assert!(bool_s.check_bool(true).is_ok());
+    assert!(bool_s.check_bool(false).is_ok());
+    assert!(bool_s.validate_bool(true).unwrap());
+    assert!(!bool_s.validate_bool(false).unwrap());
+    assert!(bool_s.check(&json!(true)).is_ok());
+    assert!(bool_s.check(&json!(false)).is_ok());
+    assert!(bool_s.check(&json!(null)).is_err());
+    assert!(bool_s.check(&json!("invalid")).is_err());
+
+    let accepted_s = boolean().accepted();
+    assert!(accepted_s.check_bool(true).is_ok());
+    assert!(accepted_s.check_bool(false).is_err());
+    assert!(accepted_s.validate_bool(true).is_ok());
+    assert!(accepted_s.validate_bool(false).is_err());
+    assert!(accepted_s.check(&json!(true)).is_ok());
+    assert!(accepted_s.check(&json!(false)).is_err());
+
+    // 3. Integer check, check_i64, validate_i64
+    let int_s = integer().between(10, 100).positive();
+    assert!(int_s.check_i64(50).is_ok());
+    assert!(int_s.check_i64(5).is_err());
+    assert!(int_s.check_i64(150).is_err());
+    assert_eq!(int_s.validate_i64(50).unwrap(), 50);
+    assert!(int_s.validate_i64(5).is_err());
+    assert!(int_s.check(&json!(50)).is_ok());
+    assert!(int_s.check(&json!(5)).is_err());
+    assert!(int_s.check(&json!(null)).is_err());
+    assert!(int_s.check(&json!("not-num")).is_err());
+
+    let neg_int = integer().negative().non_positive();
+    assert!(neg_int.check_i64(-5).is_ok());
+    assert!(neg_int.check_i64(0).is_err());
+    let non_neg = integer().non_negative();
+    assert!(non_neg.check_i64(0).is_ok());
+
+    // 4. Number check, check_f64, validate_f64, step, integer, finite
+    let num_s = number().between(10.0, 100.0).multiple_of(2.5);
+    assert!(num_s.check_f64(15.0).is_ok());
+    assert!(num_s.check_f64(16.0).is_err()); // not a multiple of 2.5
+    assert!(num_s.check_f64(5.0).is_err()); // below min
+    assert!(num_s.check_f64(105.0).is_err()); // above max
+    assert_eq!(num_s.validate_f64(15.0).unwrap(), 15.0);
+    assert!(num_s.validate_f64(16.0).is_err());
+    assert!(num_s.check(&json!(15.0)).is_ok());
+    assert!(num_s.check(&json!(16.0)).is_err());
+    assert!(num_s.check(&json!(null)).is_err());
+    assert!(num_s.check(&json!("str")).is_err());
+
+    let step_zero = number().multiple_of(0.0);
+    assert!(step_zero.check_f64(10.0).is_err());
+    let num_int = number().int().positive();
+    assert!(num_int.check_f64(10.0).is_ok());
+    assert!(num_int.check_f64(10.5).is_err());
+    let num_neg = number().negative().non_positive();
+    assert!(num_neg.check_f64(-1.0).is_ok());
+    assert!(num_neg.check_f64(0.0).is_err());
+    let num_nonneg = number().non_negative();
+    assert!(num_nonneg.check_f64(0.0).is_ok());
+
+    // 5. String check, check_str, validate_str, transforms, empty_as_null
+    let str_s = string().min_len(3).max_len(10).trim(true).to_lowercase();
+    assert!(str_s.check_str("  HELLO  ").is_ok());
+    assert!(str_s.check_str("HI").is_err());
+    assert_eq!(str_s.validate_str("  HELLO  ").unwrap(), "hello");
+    assert!(str_s.validate_str("HI").is_err());
+    assert!(str_s.check(&json!("  HELLO  ")).is_ok());
+    assert!(str_s.check(&json!("HI")).is_err());
+    assert!(str_s.check(&json!(null)).is_err());
+    assert!(str_s.check(&json!(123)).is_err());
+
+    let trim_cases = string()
+        .trim_start()
+        .trim_end()
+        .to_uppercase()
+        .normalize_email()
+        .escape_html();
+    assert_eq!(
+        trim_cases
+            .validate_str("  user.name+tag@gmail.com  ")
+            .unwrap(),
+        "USER.NAME+TAG@gmail.com"
+    );
+    assert_eq!(
+        trim_cases.validate_str("  <script>  ").unwrap(),
+        "&lt;SCRIPT&gt;"
+    );
+
+    let empty_null_s = string().empty_to_null();
+    assert!(empty_null_s.check_str("").is_err());
+    assert!(empty_null_s.check_str("valid").is_ok());
+    assert!(empty_null_s.validate_str("").is_err());
+    assert!(empty_null_s.check(&json!("")).is_err());
+
+    let alpha_s = string().alpha();
+    assert!(alpha_s.check_str("abc").is_ok());
+    assert!(alpha_s.check_str("123").is_err());
+    assert!(alpha_s.check_str("").is_err());
+    let alnum_s = string().alphanumeric();
+    assert!(alnum_s.check_str("abc123").is_ok());
+    assert!(alnum_s.check_str("abc!").is_err());
+    assert!(alnum_s.check_str("").is_err());
+    let ascii_s = string().ascii();
+    assert!(ascii_s.check_str("hello").is_ok());
+    assert!(ascii_s.check_str("🦀").is_err());
+
+    // String fast predicates error branches
+    assert!(string().ipv4().check_str("").is_err());
+    assert!(string().ipv4().check_str("1.2.3").is_err());
+    assert!(string().ipv4().check_str("1.2.3.4.5").is_err());
+    assert!(string().ipv4().check_str("1.2.3.256").is_err());
+    assert!(string().ipv4().check_str("1.2.3.01").is_err());
+    assert!(string().ipv4().check_str("1.2.3.a").is_err());
+    assert!(string().ipv4().check_str("999.999.999.999").is_err());
+
+    assert!(string().uuid().check_str("short").is_err());
+    assert!(
+        string()
+            .uuid()
+            .check_str("123456789012345678901234567890123456")
+            .is_err()
+    );
+    assert!(
+        string()
+            .uuid()
+            .check_str("123e4567-e89b-02d3-a456-426614174000")
+            .is_err()
+    ); // version 0
+    assert!(
+        string()
+            .uuid()
+            .check_str("123e4567-e89b-12d3-0456-426614174000")
+            .is_err()
+    ); // variant 0
+    assert!(
+        string()
+            .uuid()
+            .check_str("123e4567-e89b-12d3-a456-42661417400z")
+            .is_err()
+    ); // invalid hex
+
+    assert!(string().email().check_str("").is_err());
+    assert!(string().email().check_str("no-at").is_err());
+    assert!(string().email().check_str("@domain.com").is_err());
+    assert!(string().email().check_str("a@").is_err());
+    assert!(string().email().check_str("a@b").is_err());
+    assert!(string().email().check_str("a@b..c").is_err());
+    assert!(string().email().check_str("a@-b.com").is_err());
+    assert!(string().email().check_str("a@b-.com").is_err());
+
+    #[cfg(feature = "schema-color")]
+    {
+        assert!(string().rgb().check_str("rgb(255, 0)").is_err());
+        assert!(string().rgb().check_str("rgb(256, 0, 0)").is_err());
+        assert!(string().rgb().check_str("rgb(-1, 0, 0)").is_err());
+        assert!(string().rgb().check_str("rgb(a, 0, 0)").is_err());
+        assert!(string().rgba().check_str("rgba(255, 0, 0, 1.5)").is_err());
+        assert!(string().rgba().check_str("rgba(255, 0, 0, -0.5)").is_err());
+        assert!(string().rgba().check_str("rgba(255, 0, 0, abc)").is_err());
+        assert!(string().rgba().check_str("rgba(255, 0, 0)").is_err());
+        assert!(string().hsl().check_str("hsl(400, 50%, 50%)").is_err());
+        assert!(string().hsl().check_str("hsl(200, 150%, 50%)").is_err());
+        assert!(string().hsl().check_str("hsl(200, 50%, 150%)").is_err());
+        assert!(
+            string()
+                .hsla()
+                .check_str("hsla(200, 50%, 50%, 2.0)")
+                .is_err()
+        );
+        assert!(string().hsla().check_str("hsla(200, 50%, 50%)").is_err());
+    }
+
+    // 6. Array check, not_empty, bounds, distinct, subset, contains
+    let arr_s = array(integer())
+        .not_empty()
+        .min_items(2)
+        .max_items(4)
+        .exact_items(3)
+        .distinct();
+    assert!(arr_s.check(&json!([1, 2, 3])).is_ok());
+    assert!(arr_s.check(&json!([])).is_err());
+    assert!(arr_s.check(&json!([1])).is_err());
+    assert!(arr_s.check(&json!([1, 2, 3, 4])).is_err());
+    assert!(arr_s.check(&json!([1, 1, 3])).is_err());
+    assert!(arr_s.check(&json!([1, "not-num", 3])).is_err());
+    assert!(arr_s.check(&json!(null)).is_err());
+    assert!(arr_s.check(&json!(123)).is_err());
+
+    // Array distinct > 16 items
+    let large_distinct: Vec<i64> = (0..20).collect();
+    assert!(
+        array(integer())
+            .distinct()
+            .check(&json!(large_distinct))
+            .is_ok()
+    );
+    let mut large_dup = large_distinct.clone();
+    large_dup[19] = 0;
+    assert!(
+        array(integer())
+            .distinct()
+            .check(&json!(large_dup))
+            .is_err()
+    );
+
+    // Array subset and contains in check
+    let arr_subset = array(string())
+        .subset_of(&["a", "b", "c"])
+        .contains("a")
+        .contains_all(vec![json!("a"), json!("b")])
+        .contains_any(vec![json!("a"), json!("b")]);
+    assert!(arr_subset.check(&json!(["a", "b"])).is_ok());
+    assert!(arr_subset.check(&json!(["a", "d"])).is_err());
+    assert!(arr_subset.check(&json!(["b", "c"])).is_err()); // missing "a"
+    assert!(arr_subset.check(&json!(["a", "c"])).is_err()); // missing "b"
+
+    // 7. Tuple check: native tuples and macro tuples
+    let native_tuple = (string(), integer());
+    assert!(native_tuple.check(&json!(["hello", 42])).is_ok());
+    assert!(native_tuple.check(&json!(["hello"])).is_err());
+    assert!(native_tuple.check(&json!(123)).is_err());
+    assert!(native_tuple.check(&json!(["hello", "not-int"])).is_err());
+
+    let obj_with_native = object().field("tup", (string(), integer()));
+    assert!(
+        obj_with_native
+            .check(&json!({ "tup": ["hello", 42] }))
+            .is_ok()
+    );
+    assert!(
+        obj_with_native
+            .check(&json!({ "tup": ["hello", "bad"] }))
+            .is_err()
+    );
+
+    let t2 = tuple2(string(), integer());
+    assert!(t2.check(&json!(["a", 1])).is_ok());
+    assert!(t2.check(&json!(["a"])).is_err());
+    assert!(t2.check(&json!(123)).is_err());
+    assert!(t2.check(&json!(["a", "bad"])).is_err());
+
+    let t3 = tuple3(string(), integer(), boolean());
+    assert!(t3.check(&json!(["a", 1, true])).is_ok());
+    assert!(t3.check(&json!(["a", 1])).is_err());
+    assert!(t3.check(&json!(["a", 1, "not-bool"])).is_err());
+
+    let t4 = tuple4(string(), integer(), boolean(), number());
+    assert!(t4.check(&json!(["a", 1, true, 3.15])).is_ok());
+    assert!(t4.check(&json!(["a", 1, true])).is_err());
+
+    // 8. Union check: union2, union3, union4
+    let u2 = union2(string().min_len(5), string().email());
+    assert!(u2.check(&json!("hello")).is_ok());
+    assert!(u2.check(&json!("a@b.com")).is_ok());
+    assert!(u2.check(&json!("hi")).is_err());
+
+    let u3 = union3(
+        string().min_len(5),
+        string().email(),
+        string().starts_with("prefix_"),
+    );
+    assert!(u3.check(&json!("prefix_test")).is_ok());
+    assert!(u3.check(&json!("bad")).is_err());
+
+    let u4 = union4(
+        string().min_len(5),
+        string().email(),
+        string().starts_with("p_"),
+        string().ends_with("_s"),
+    );
+    assert!(u4.check(&json!("test_s")).is_ok());
+    assert!(u4.check(&json!("bad")).is_err());
+
+    // 9. Record check
+    let rec_s = record(integer());
+    assert!(rec_s.check(&json!({ "x": 1, "y": 2 })).is_ok());
+    assert!(rec_s.check(&json!({ "x": 1, "y": "bad" })).is_err());
+    assert!(rec_s.check(&json!(null)).is_err());
+    assert!(rec_s.check(&json!(123)).is_err());
+
+    // 10. Enum check
+    #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+    enum RoleTest {
+        Admin,
+        User,
+    }
+    impl std::str::FromStr for RoleTest {
+        type Err = String;
+        fn from_str(s: &str) -> Result<Self, Self::Err> {
+            match s {
+                "admin" => Ok(RoleTest::Admin),
+                "user" => Ok(RoleTest::User),
+                _ => Err("invalid".to_string()),
+            }
+        }
+    }
+    let role_s = enum_of::<RoleTest>();
+    assert!(role_s.check(&json!("admin")).is_ok());
+    assert!(role_s.check(&json!("invalid")).is_err());
+    assert!(role_s.check(&json!(null)).is_err());
+    assert!(role_s.check(&json!(123)).is_err());
+
+    // 11. Date check
+    let dt_s = date();
+    assert!(dt_s.check(&json!("2026-11-23T08:00:00Z")).is_ok());
+    assert!(dt_s.check(&json!("invalid")).is_err());
+    assert!(dt_s.check(&json!(null)).is_err());
+    assert!(dt_s.check(&json!(123)).is_err());
+
+    let d_s = date().date_only();
+    assert!(d_s.check(&json!("2026-11-23")).is_ok());
+    assert!(d_s.check(&json!("invalid")).is_err());
+
+    let tm_s = date().time_only();
+    assert!(tm_s.check(&json!("12:30:00Z")).is_ok());
+    assert!(tm_s.check(&json!("invalid")).is_err());
+
+    // 12. Optional, Nullable, Default check
+    let opt_s = string().optional();
+    assert!(opt_s.check(&json!(null)).is_ok());
+    assert!(opt_s.check(&json!("val")).is_ok());
+    assert!(opt_s.check(&json!(123)).is_err());
+
+    let null_s = string().nullable();
+    assert!(null_s.check(&json!(null)).is_ok());
+    assert!(null_s.check(&json!("val")).is_ok());
+    assert!(null_s.check(&json!(123)).is_err());
+
+    let def_s = string().default_value("def".to_string());
+    assert!(def_s.check(&json!(null)).is_ok());
+    assert!(def_s.check(&json!("val")).is_ok());
+    assert!(def_s.check(&json!(123)).is_err());
+
+    // 13. Object check
+    let obj_s = object()
+        .field("name", string().min_len(2))
+        .field("score", integer().positive())
+        .strict()
+        .cross_refine(&["name"], |_| true, "rule", "msg");
+    assert!(
+        obj_s
+            .check(&json!({ "name": "alice", "score": 10 }))
+            .is_ok()
+    );
+    assert!(
+        obj_s
+            .check(&json!({ "name": "alice", "score": 10, "extra": 1 }))
+            .is_err()
+    );
+    assert!(obj_s.check(&json!({ "name": "a", "score": 10 })).is_err());
+    assert!(obj_s.check(&json!(null)).is_err());
+    assert!(obj_s.check(&json!("str")).is_err());
+
+    // Object typed_to_value numbers
+    let obj_num = object().field("f", number()).field("i", integer());
+    let val_num = obj_num.validate(&json!({ "f": 1.25, "i": 42 })).unwrap();
+    assert_eq!(val_num["f"], 1.25);
+    assert_eq!(val_num["i"], 42);
+
+    // 14. Request check_request, check_request_with_context, and coercer
+    let req_s = request()
+        .params(object().field("id", integer()))
+        .query(object().field("q", string()))
+        .coercer(jachai::coercion::Coercer::new().empty_strings_to_null(true));
+
+    let parts = RequestParts::new()
+        .with_params(json!({ "id": 1 }))
+        .with_query(json!({ "q": "search" }))
+        .with_headers(json!({}))
+        .with_cookies(json!({}))
+        .with_body(json!({}));
+    assert!(req_s.check_request(&parts).is_ok());
+
+    let ctx = ValidationContext::new();
+    assert!(
+        req_s
+            .check_request_with_context(&parts, &ctx, jachai::messages::default_messages_provider())
+            .is_ok()
+    );
+
+    let bad_parts = RequestParts::new().with_params(json!({ "id": "not-int" }));
+    assert!(req_s.check_request(&bad_parts).is_err());
+
+    // Schema trait check on RequestSchema
+    let req_as_schema: &dyn Schema<ValidatedRequest> = &req_s;
+    assert!(
+        req_as_schema
+            .check(&json!({ "params": { "id": 1 }, "query": { "q": "test" } }))
+            .is_ok()
+    );
+    assert!(
+        req_as_schema
+            .check(&json!({ "params": { "id": "bad" } }))
+            .is_err()
+    );
+
+    // RequestParts conversions
+    let null_parts = RequestParts::from(serde_json::Value::Null);
+    assert_eq!(null_parts.params, serde_json::Value::Null);
+    let mut parts_map = serde_json::Map::new();
+    parts_map.insert("params".to_string(), json!({ "id": 99 }));
+    let from_map = RequestParts::from(serde_json::Value::Object(parts_map));
+    assert_eq!(from_map.params["id"], 99);
+
+    // RequestSchema validate_async failure with path
+    let async_req = request().params(object().field(
+        "id",
+        string().refine_async(|id| {
+            let v = id.to_string();
+            Box::pin(async move {
+                if v == "valid" {
+                    Ok(())
+                } else {
+                    Err("must be valid".to_string())
+                }
+            })
+        }),
+    ));
+    let async_bad = RequestParts::new().with_params(json!({ "id": "invalid" }));
+    let async_err = async_req.validate_async(&async_bad).await.unwrap_err();
+    assert!(async_err.field_errors().contains_key("params.id"));
+    let async_bad = RequestParts::new().with_params(json!({ "id": -10 }));
+    let async_err = async_req.validate_async(&async_bad).await.unwrap_err();
+    assert!(async_err.field_errors().contains_key("params.id"));
+
+    // 15. Messages edge cases
+    let custom_msgs = SimpleMessagesProvider::new();
+    let empty_rendered = custom_msgs.format_message("", "unknown", &RuleParams::new(), None);
+    assert!(empty_rendered.contains("value"));
+}
+
+#[tokio::test]
+async fn test_coverage_maximum_sweep() {
+    use jachai::messages::{default_messages_provider, humanize_field_name};
+
+    // 1. messages.rs
+    assert_eq!(humanize_field_name(""), "value");
+    let provider = default_messages_provider();
+    let rendered_unknown = provider.format_message(
+        "user_email",
+        "custom_rule",
+        &RuleParams::new(),
+        Some("Invalid :placeholder for :field"),
+    );
+    assert!(rendered_unknown.contains(":placeholder"));
+    assert!(rendered_unknown.contains("user email"));
+
+    // 2. request.rs
+    let parts_full = RequestParts::new()
+        .with_params(json!({ "id": 1 }))
+        .with_query(json!({ "page": 2 }))
+        .with_headers(json!({ "authorization": "Bearer token" }))
+        .with_cookies(json!({ "session": "xyz" }))
+        .with_body(json!({ "data": "payload" }));
+    let validated_full = request()
+        .params(object().field("id", integer()))
+        .query(object().field("page", integer()))
+        .headers(object().field("authorization", string()))
+        .cookies(object().field("session", string()))
+        .body(object().field("data", string()))
+        .validate(&parts_full)
+        .unwrap();
+    let parts_val = validated_full.to_value();
+    assert!(parts_val.get("headers").is_some());
+    assert!(parts_val.get("cookies").is_some());
+    assert!(parts_val.get("body").is_some());
+
+    let parts_non_obj = RequestParts::from(&json!("not_an_object"));
+    assert_eq!(parts_non_obj.params, serde_json::Value::Null);
+
+    let req_with_coercer_cleared = request().sanitize(true).sanitize(false);
+    assert!(
+        req_with_coercer_cleared
+            .check_request(&RequestParts::default())
+            .is_ok()
+    );
+
+    let req_bail = request()
+        .params(object().field("id", integer().min(10)))
+        .bail(true);
+    let bad_parts = RequestParts::new().with_params(json!({ "id": 2 }));
+    assert!(req_bail.check_request(&bad_parts).is_err());
+
+    // Request parts downcast to String and serde_json::to_value fallback
+    let req_typed = request()
+        .params(string().min_len(2))
+        .query(integer().min(1));
+    let typed_parts = RequestParts::new()
+        .with_params(json!("hello"))
+        .with_query(json!(5));
+    let validated_typed = req_typed.validate(&typed_parts).unwrap();
+    assert_eq!(validated_typed.params.unwrap(), json!("hello"));
+    assert_eq!(validated_typed.query.unwrap(), json!(5));
+
+    // Request async validation with path and errors
+    let ctx = ValidationContext::new();
+    let req_schema_nested: &dyn Schema<ValidatedRequest> = &req_typed;
+    let nested_req_err = req_schema_nested
+        .validate_async_path(
+            &json!({ "params": "x", "query": 0 }),
+            "envelope",
+            &ctx,
+            None,
+            default_messages_provider(),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        nested_req_err
+            .issues()
+            .iter()
+            .any(|i| i.field.starts_with("envelope."))
+    );
+
+    let req_bail_schema: &dyn Schema<ValidatedRequest> = &req_bail;
+    assert!(
+        req_bail_schema
+            .check_path(
+                &json!({ "params": { "id": 1 } }),
+                "root",
+                &ctx,
+                None,
+                default_messages_provider(),
+            )
+            .is_err()
+    );
+
+    // 3. schema/array.rs
+    let nested_arr_obj = object().field("items", array(integer().min(10)));
+    let arr_err = nested_arr_obj
+        .validate(&json!({ "items": [2] }))
+        .unwrap_err();
+    assert_eq!(arr_err.issues()[0].field, "items[0]");
+
+    assert!(
+        array(integer())
+            .bail(true)
+            .not_empty()
+            .check(&json!([]))
+            .is_err()
+    );
+    assert!(
+        array(integer())
+            .bail(true)
+            .min_items(3)
+            .check(&json!([1, 2]))
+            .is_err()
+    );
+    assert!(
+        array(integer())
+            .bail(true)
+            .max_items(1)
+            .check(&json!([1, 2]))
+            .is_err()
+    );
+    assert!(
+        array(integer())
+            .bail(true)
+            .exact_items(2)
+            .check(&json!([1]))
+            .is_err()
+    );
+    assert!(
+        array(integer())
+            .bail(true)
+            .distinct()
+            .check(&json!([1, 1]))
+            .is_err()
+    );
+    assert!(
+        array(string())
+            .subset_of(&["a", "b"])
+            .bail(true)
+            .check(&json!(["a", "c"]))
+            .is_err()
+    );
+    assert!(
+        array(integer())
+            .bail(true)
+            .contains(json!(10))
+            .check(&json!([1, 2]))
+            .is_err()
+    );
+    assert!(
+        array(integer())
+            .bail(true)
+            .contains_all(vec![json!(1), json!(2)])
+            .check(&json!([1, 3]))
+            .is_err()
+    );
+
+    let items_17: Vec<serde_json::Value> = (0..16)
+        .map(|i| json!(i))
+        .chain(std::iter::once(json!(0)))
+        .collect();
+    assert!(
+        array(integer())
+            .distinct()
+            .bail(true)
+            .validate(&serde_json::Value::Array(items_17))
+            .is_err()
+    );
+
+    // 4. schema/boolean.rs
+    assert!(boolean().check(&json!("true")).is_ok());
+    assert!(boolean().check(&json!(1)).is_ok());
+
+    // 5. schema/date.rs
+    assert!(date().duration().check(&json!("P1Y2M3D")).is_ok());
+    assert!(date().duration().check(&json!("P")).is_err());
+    assert!(date().check(&json!("2026-03-30T12:00:00+05:00")).is_ok());
+
+    // 6. schema/number.rs
+    assert!(number().finite().check(&json!(f64::INFINITY)).is_err());
+    assert!(number().check(&json!("987.65")).is_ok());
+    assert!(number().check(&json!(true)).is_err());
+
+    let num_all_pred = number()
+        .min(5.0)
+        .max(10.0)
+        .finite()
+        .safe_integer()
+        .latitude()
+        .longitude();
+    assert!(num_all_pred.check_f64(7.0).is_ok());
+
+    assert!(integer().min(10).check_i64(5).is_err());
+    assert!(integer().max(10).check_i64(15).is_err());
+    assert!(integer().range(5, 10).check_i64(15).is_err());
+    assert!(integer().positive().check_i64(-5).is_err());
+    assert!(integer().negative().check_i64(5).is_err());
+    assert!(integer().non_positive().check_i64(5).is_err());
+    assert!(integer().non_negative().check_i64(-5).is_err());
+    assert!(integer().multiple_of(5).check_i64(7).is_err());
+
+    // 7. schema/object.rs
+    let nested_obj = object().field("inner", object().field("tag", string()));
+    let nested_res = nested_obj
+        .validate(&json!({ "inner": { "tag": "jachai" } }))
+        .unwrap();
+    assert_eq!(nested_res["inner"]["tag"], "jachai");
+
+    #[derive(Clone)]
+    struct CustomU64Schema;
+    impl Schema<u64> for CustomU64Schema {
+        fn validate_path(
+            &self,
+            value: &serde_json::Value,
+            path: &str,
+            context: &ValidationContext,
+            parent_data: Option<&serde_json::Value>,
+            messages: &dyn MessagesProvider,
+        ) -> Result<u64, ValidationError> {
+            let _ = (value, path, context, parent_data, messages);
+            Ok(999u64)
+        }
+    }
+    let u64_obj = object().field("count", CustomU64Schema);
+    let u64_res = u64_obj.validate(&json!({ "count": 999 })).unwrap();
+    assert_eq!(u64_res["count"], 999);
+
+    let conf_obj = object()
+        .field("pwd", string())
+        .field("pwd_confirmation", string())
+        .field("other", string())
+        .confirmed("pwd");
+    let picked_conf = conf_obj.clone().pick(&["pwd", "pwd_confirmation"]);
+    let omitted_conf = conf_obj.omit(&["other"]);
+    assert!(
+        picked_conf
+            .validate(&json!({ "pwd": "secret", "pwd_confirmation": "secret" }))
+            .is_ok()
+    );
+    assert!(
+        omitted_conf
+            .validate(&json!({ "pwd": "secret", "pwd_confirmation": "secret" }))
+            .is_ok()
+    );
+
+    let cross_obj = object()
+        .field("k1", string())
+        .field("k2", string())
+        .field("extra", string())
+        .cross_refine(
+            &["k1", "k2"],
+            |map| map.get("k1") == map.get("k2"),
+            "match",
+            "must match",
+        );
+    let cross_picked = cross_obj.clone().pick(&["k1", "k2"]);
+    let cross_omitted = cross_obj.omit(&["extra"]);
+    assert!(
+        cross_picked
+            .validate(&json!({ "k1": "same", "k2": "same" }))
+            .is_ok()
+    );
+    assert!(
+        cross_omitted
+            .validate(&json!({ "k1": "same", "k2": "same" }))
+            .is_ok()
+    );
+
+    let coercer_obj = object()
+        .field("name", string())
+        .coercer(jachai::coercion::Coercer::new().empty_strings_to_null(true));
+    assert!(coercer_obj.check(&json!({ "name": "valid" })).is_ok());
+    assert!(
+        coercer_obj
+            .validate_async(&json!({ "name": "valid" }))
+            .await
+            .is_ok()
+    );
+
+    let obj_bail = object()
+        .field("a", string().min_len(5))
+        .field("b", string().min_len(5))
+        .bail(true);
+    assert!(obj_bail.check(&json!({ "a": "x", "b": "y" })).is_err());
+
+    // 8. schema/tuple.rs
+    assert!(
+        (string(), integer())
+            .validate_async(&json!(["only_first"]))
+            .await
+            .is_err()
+    );
+    let tuple_err = (string().min_len(5), integer())
+        .validate_async_path(
+            &json!(["a", 10]),
+            "coords",
+            &ctx,
+            None,
+            default_messages_provider(),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(tuple_err.issues()[0].field, "coords[0]");
+
+    let t2_bail = tuple2(string().min_len(5), integer().min(10)).bail(true);
+    let t2_err = t2_bail
+        .check_path(
+            &json!(["x", 2]),
+            "pair",
+            &ctx,
+            None,
+            default_messages_provider(),
+        )
+        .unwrap_err();
+    eprintln!("T2_ERR: {:?}", t2_err.issues());
+    assert_eq!(t2_err.issues().len(), 1);
+
+    // 9. schema/optional.rs
+    let nullable_json_schema = object().nullable().to_json_schema();
+    assert!(nullable_json_schema.get("type").is_some());
+
+    // 10. schema/record.rs
+    let rec_bail = record(string().min_len(5)).bail(true);
+    let rec_err = rec_bail
+        .check_path(
+            &json!({ "f1": "a", "f2": "b" }),
+            "data",
+            &ctx,
+            None,
+            default_messages_provider(),
+        )
+        .unwrap_err();
+    assert_eq!(rec_err.issues().len(), 1);
+
+    // 11. schema/union.rs
+    assert!(
+        union2(string().min_len(5), string().email())
+            .check(&json!("hello"))
+            .is_ok()
+    );
+    assert!(
+        union2(string().min_len(10), string().email())
+            .check(&json!("test@example.com"))
+            .is_ok()
+    );
+
+    // 12. schema/file.rs
+    assert!(
+        file()
+            .max_size(10)
+            .bail(true)
+            .validate(&json!({ "size": 100, "mime_type": "text/plain" }))
+            .is_err()
+    );
+
+    // 13. schema/enum.rs
+    #[derive(Debug, PartialEq, Eq)]
+    enum StatusChoice {
+        Active,
+        Inactive,
+    }
+    impl std::str::FromStr for StatusChoice {
+        type Err = String;
+        fn from_str(s: &str) -> Result<Self, Self::Err> {
+            match s {
+                "active" => Ok(StatusChoice::Active),
+                "inactive" => Ok(StatusChoice::Inactive),
+                _ => Err("invalid status".to_string()),
+            }
+        }
+    }
+    let status_enum = enum_of::<StatusChoice>();
+    assert!(status_enum.validate(&json!(123)).is_err());
+    assert!(status_enum.validate(&json!("unknown")).is_err());
+
+    // 14. schema/mod.rs (default check_path on Schema trait)
+    #[derive(Clone)]
+    struct CustomDefaultCheckSchema;
+    impl Schema<i32> for CustomDefaultCheckSchema {
+        fn validate_path(
+            &self,
+            value: &serde_json::Value,
+            path: &str,
+            context: &ValidationContext,
+            parent_data: Option<&serde_json::Value>,
+            messages: &dyn MessagesProvider,
+        ) -> Result<i32, ValidationError> {
+            let _ = (context, parent_data, messages);
+            value
+                .as_i64()
+                .map(|v| v as i32)
+                .ok_or_else(|| ValidationError::single(path, "int", "must be integer"))
+        }
+    }
+    let default_trait_schema = CustomDefaultCheckSchema;
+    assert!(default_trait_schema.check(&json!(42)).is_ok());
+    assert!(default_trait_schema.check(&json!("not_num")).is_err());
+
+    // 15. schema/string.rs
+    // Email edge cases
+    assert!(
+        string()
+            .email()
+            .check_str(&format!("user@{}.com", "a".repeat(255)))
+            .is_err()
+    );
+    assert!(string().email().check_str("user name@example.com").is_err());
+    assert!(string().email().check_str("user@exam$ple.com").is_err());
+
+    // IPv4 fast check edge cases
+    assert!(string().ipv4().check_str("127.0.0.1.1").is_err());
+    assert!(string().ipv4().check_str("127.0.0..1").is_err());
+    assert!(string().ipv4().check_str("127.0.0.300").is_err());
+    assert!(string().ipv4().check_str("127.0.0.01").is_err());
+    assert!(string().ipv4().check_str("127.0.0.x").is_err());
+    assert!(string().ipv4().check_str("127.0.0").is_err());
+    assert!(string().ipv4().check_str("127.0.0.1").is_ok());
+
+    // URL fast check edge cases
+    assert!(string().url().check_str("ftp://ftp.example.com").is_ok());
+    assert!(string().url().check_str("http://").is_err());
+    assert!(string().url().check_str("http:///test").is_err());
+    assert!(
+        string()
+            .url()
+            .check_str("http://example.com/ space")
+            .is_err()
+    );
+
+    // Fallback predicate in check_str
+    assert!(
+        string()
+            .starts_with("prefix")
+            .check_str("prefix_val")
+            .is_ok()
+    );
+    assert!(string().regex(r"^\d+$").check_str("12345").is_ok());
+
+    // Sanitization variations
+    assert!(string().trim_start().check_str("  hi").is_ok());
+    assert!(string().trim_end().check_str("hi  ").is_ok());
+    assert!(string().to_uppercase().check_str("hi").is_ok());
+    assert!(
+        string()
+            .normalize_email()
+            .check_str("USER+TAG@GMAIL.COM")
+            .is_ok()
+    );
+    assert!(string().escape_html().check_str("<b>text</b>").is_ok());
+
+    assert_eq!(string().trim_start().validate_str("  hi").unwrap(), "hi");
+    assert_eq!(string().trim_end().validate_str("hi  ").unwrap(), "hi");
+    assert_eq!(string().to_uppercase().validate_str("hi").unwrap(), "HI");
+    assert_eq!(
+        string()
+            .normalize_email()
+            .validate_str("USER+TAG@GMAIL.COM")
+            .unwrap(),
+        "USER+TAG@gmail.com"
+    );
+    assert_eq!(
+        string().escape_html().validate_str("<b>text</b>").unwrap(),
+        "&lt;b&gt;text&lt;/b&gt;"
+    );
+
+    assert_eq!(
+        string().trim_start().validate(&json!("  hi")).unwrap(),
+        "hi"
+    );
+    assert_eq!(string().trim_end().validate(&json!("hi  ")).unwrap(), "hi");
+    assert_eq!(
+        string().to_uppercase().validate(&json!("hi")).unwrap(),
+        "HI"
+    );
+    assert_eq!(
+        string()
+            .normalize_email()
+            .validate(&json!("USER+TAG@GMAIL.COM"))
+            .unwrap(),
+        "USER+TAG@gmail.com"
+    );
+    assert_eq!(
+        string()
+            .escape_html()
+            .validate(&json!("<b>text</b>"))
+            .unwrap(),
+        "&lt;b&gt;text&lt;/b&gt;"
+    );
+
+    assert!(string().min_len(10).bail(true).check_str("abc").is_err());
+    assert!(string().min_len(10).bail(true).validate_str("abc").is_err());
+    assert!(
+        string()
+            .min_len(10)
+            .bail(true)
+            .validate(&json!("abc"))
+            .is_err()
+    );
+
+    // Other string rules
+    assert!(string().domain().check_str("invalid_domain!.com").is_err());
+    assert!(string().fqdn().check_str("invalid_fqdn!.com").is_err());
+    assert!(
+        string()
+            .port()
+            .check_str("999999999999999999999999")
+            .is_err()
+    );
+    assert!(
+        string()
+            .cidr()
+            .check_str("192.168.1.0/99999999999999")
+            .is_err()
+    );
+    assert!(string().iban().check_str("GB82WEST12345698765430").is_err());
+    assert!(string().isin().check_str("US037833100$").is_err());
+    assert!(
+        string()
+            .rgba()
+            .check_str("rgba(255, 255, 255, 0.5")
+            .is_err()
+    );
+    assert!(
+        string()
+            .hsla()
+            .check_str("hsla(180, 50%, 50%, 0.5")
+            .is_err()
+    );
+    assert!(
+        string()
+            .hsla()
+            .check_str("hsla(180, 50%, 50%, 0.5)")
+            .is_ok()
+    );
+    assert!(
+        string()
+            .hsl()
+            .check_str("hsl(invalid 50% 50% / 0.5)")
+            .is_err()
+    );
+    assert!(
+        string()
+            .hsl()
+            .check_str("hsl(notanumber, 50%, 50%)")
+            .is_err()
+    );
+    assert!(
+        string()
+            .ethereum_address()
+            .check_str("123456789012345678901234567890123456789012")
+            .is_err()
+    );
+    assert!(string().bcp47().check_str(&"a".repeat(36)).is_err());
+    assert!(string().cron().check_str("* * * * $").is_err());
+    assert!(string().isbn10().check_str("047195869?").is_err());
+
+    // 16. Fast match string predicates
+    assert!(
+        string()
+            .datetime()
+            .check_str("2026-03-30T12:00:00Z")
+            .is_ok()
+    );
+    assert!(string().credit_card().check_str("4532015112830366").is_ok());
+    assert!(
+        string()
+            .ulid()
+            .check_str("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+            .is_ok()
+    );
+    assert!(string().hex_color().check_str("#ffffff").is_ok());
+    assert!(string().slug().check_str("valid-slug-123").is_ok());
+    assert!(string().semver().check_str("1.2.3").is_ok());
+    assert!(string().base64().check_str("YQ==").is_ok());
+    assert!(string().starts_with("a").check_str("abc").is_ok());
+    assert!(string().ends_with("c").check_str("abc").is_ok());
+    assert!(string().contains("b").check_str("abc").is_ok());
+    assert!(string().alpha().check_str("abc").is_ok());
+    assert!(string().alpha().check_str("abc1").is_err());
+    assert!(string().alpha().check_str("é").is_ok());
+    assert!(string().alphanumeric().check_str("abc1").is_ok());
+    assert!(string().alphanumeric().check_str("é1").is_ok());
+    assert!(string().ascii().check_str("abc").is_ok());
+
+    // Color branches
+    assert!(string().rgb().check_str("rgb(255, 255, 255, 0.5)").is_ok());
+    assert!(string().rgb().check_str("rgb(not_num%, 50%, 50%)").is_err());
+    assert!(
+        string()
+            .rgba()
+            .check_str("rgba(255, 255, 255, not_num%)")
+            .is_err()
+    );
+    assert!(string().rgba().check_str("rgba(255 255 255)").is_err());
+    assert!(
+        string()
+            .hsla()
+            .check_str("hsla(180, 50%, 50%, 50%)")
+            .is_ok()
+    );
+    assert!(string().hsl().check_str("hsl(180, 50%, 50%, 0.5)").is_ok());
+    assert!(string().hsla().check_str("hsla(180 50% 50%)").is_err());
+
+    // 17. Additional request branches
+    let req_san = request()
+        .params(object().field("id", integer()))
+        .sanitize(true);
+    let parts_san = RequestParts::new().with_params(json!({ "id": 1 }));
+    assert!(req_san.check_request(&parts_san).is_ok());
+    let req_san_schema: &dyn Schema<ValidatedRequest> = &req_san;
+    assert!(
+        req_san_schema
+            .check_path(
+                &json!({ "params": { "id": 1 } }),
+                "root",
+                &ctx,
+                None,
+                default_messages_provider(),
+            )
+            .is_ok()
+    );
+    assert!(
+        req_san_schema
+            .validate_async_path(
+                &json!({ "params": { "id": 1 } }),
+                "",
+                &ctx,
+                None,
+                default_messages_provider(),
+            )
+            .await
+            .is_ok()
+    );
+
+    let req_async_bail = request()
+        .params(object().field("id", integer().min(10)))
+        .bail(true);
+    let req_async_bail_schema: &dyn Schema<ValidatedRequest> = &req_async_bail;
+    assert!(
+        req_async_bail_schema
+            .validate_async_path(
+                &json!({ "params": { "id": 1 } }),
+                "",
+                &ctx,
+                None,
+                default_messages_provider(),
+            )
+            .await
+            .is_err()
+    );
+
+    let async_typed_val = req_typed.validate_async(&typed_parts).await.unwrap();
+    assert_eq!(async_typed_val.params.unwrap(), json!("hello"));
+    assert_eq!(async_typed_val.query.unwrap(), json!(5));
+
+    // 18. Additional object branches
+    let obj_san = object().sanitize(true).sanitize(false);
+    assert!(obj_san.check(&json!({})).is_ok());
+    assert!(
+        object()
+            .strict()
+            .bail(true)
+            .check(&json!({ "unknown": 1 }))
+            .is_err()
+    );
+    assert!(
+        object()
+            .field("opt", string().optional())
+            .check(&json!({}))
+            .is_ok()
+    );
+    assert!(
+        object()
+            .optional_field("opt", string())
+            .check(&json!({ "opt": "valid" }))
+            .is_ok()
+    );
+
+    // 19. Additional tuple branches
+    let t3_bail = tuple3(string().min_len(5), integer().min(10), boolean()).bail(true);
+    assert!(
+        t3_bail
+            .check_path(
+                &json!(["a", 2, true]),
+                "t3",
+                &ctx,
+                None,
+                default_messages_provider(),
+            )
+            .is_err()
+    );
+    let t4_bail = tuple4(string().min_len(5), integer().min(10), boolean(), string()).bail(true);
+    assert!(
+        t4_bail
+            .check_path(
+                &json!(["a", 2, true, "x"]),
+                "t4",
+                &ctx,
+                None,
+                default_messages_provider(),
+            )
+            .is_err()
+    );
+
+    let native_t3 = (string(), integer(), boolean());
+    assert!(
+        native_t3
+            .validate_path(
+                &json!(["a", 1, true]),
+                "nt3",
+                &ctx,
+                None,
+                default_messages_provider(),
+            )
+            .is_ok()
+    );
+    let native_t4 = (string(), integer(), boolean(), string());
+    assert!(
+        native_t4
+            .validate_path(
+                &json!(["a", 1, true, "b"]),
+                "nt4",
+                &ctx,
+                None,
+                default_messages_provider(),
+            )
+            .is_ok()
+    );
+
+    assert!(
+        (string().min_len(5), integer())
+            .validate_async(&json!(["bad", "not_int"]))
+            .await
+            .is_err()
+    );
+    assert!(
+        (string().min_len(5), integer(), boolean())
+            .validate_async(&json!(["bad", "not_int", true]))
+            .await
+            .is_err()
+    );
+    assert!(
+        (string().min_len(5), integer(), boolean(), string())
+            .validate_async(&json!(["bad", "not_int", true, "ok"]))
+            .await
+            .is_err()
+    );
+
+    // 20. Union 3 and 4 branches
+    assert!(
+        union3(
+            string().min_len(10),
+            string().email(),
+            string().alphanumeric()
+        )
+        .check(&json!("abc12345"))
+        .is_ok()
+    );
+    assert!(
+        union4(
+            string().min_len(10),
+            string().email(),
+            string().alphanumeric(),
+            string().ascii()
+        )
+        .check(&json!("hello"))
+        .is_ok()
+    );
+
+    // 21. File branch without bail
+    assert!(
+        file()
+            .max_size(10)
+            .validate(&json!({ "size": 100 }))
+            .is_err()
+    );
+
+    // 22. Optional empty json schema
+    use jachai::schema::json_schema::ToJsonSchema;
+    #[derive(Clone)]
+    struct EmptyJsonSchema;
+    impl Schema<String> for EmptyJsonSchema {
+        fn validate_path(
+            &self,
+            value: &serde_json::Value,
+            path: &str,
+            context: &ValidationContext,
+            parent_data: Option<&serde_json::Value>,
+            messages: &dyn MessagesProvider,
+        ) -> Result<String, ValidationError> {
+            let _ = (path, context, parent_data, messages);
+            Ok(value.as_str().unwrap_or("").to_string())
+        }
+    }
+    impl ToJsonSchema for EmptyJsonSchema {
+        fn to_json_schema(&self) -> serde_json::Value {
+            serde_json::Value::Object(serde_json::Map::new())
+        }
+    }
+    assert_eq!(EmptyJsonSchema.nullable().to_json_schema(), json!({}));
+
+    // 23. Number edge branches
+    assert!(number().finite().check_f64(f64::INFINITY).is_err());
+    assert!(number().decimal_places(2).check_f64(3.15).is_ok());
+    assert!(
+        number()
+            .decimal_places(2)
+            .min(10.0)
+            .bail(true)
+            .check_f64(3.15)
+            .is_err()
+    );
+    assert!(
+        number()
+            .min(10.0)
+            .max(5.0)
+            .bail(true)
+            .check(&json!(2.0))
+            .is_err()
+    );
+
+    struct FailingAsyncNumRule;
+    impl AsyncCustomRule<f64> for FailingAsyncNumRule {
+        fn validate<'a>(
+            &'a self,
+            value: &'a f64,
+            context: &'a RuleContext<'_>,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<(), ValidationIssue>> + Send + 'a>,
+        > {
+            let dummy_num = *value;
+            assert!(dummy_num > 0.0);
+            Box::pin(async move { Err(context.create_issue("fail", RuleParams::new(), None)) })
+        }
+    }
+    assert!(
+        number()
+            .rule_async(FailingAsyncNumRule)
+            .rule_async(FailingAsyncNumRule)
+            .bail(true)
+            .validate_async(&json!(5.0))
+            .await
+            .is_err()
+    );
+    assert!(
+        number()
+            .multiple_of(2.5)
+            .to_json_schema()
+            .get("multipleOf")
+            .is_some()
+    );
+    assert!(integer().min(5).max(10).multiple_of(2).check_i64(8).is_ok());
+    assert!(integer().to_json_schema().get("type").is_some());
+
+    // 24. Array edge branches
+    assert!(
+        array(string().min_len(5))
+            .validate_path(
+                &json!(["bad"]),
+                "items",
+                &ctx,
+                None,
+                default_messages_provider()
+            )
+            .is_err()
+    );
+    assert!(
+        array(string().min_len(5))
+            .check_path(
+                &json!(["bad"]),
+                "items",
+                &ctx,
+                None,
+                default_messages_provider()
+            )
+            .is_err()
+    );
+    let items_17_check: Vec<serde_json::Value> = (0..16)
+        .map(|i| json!(i))
+        .chain(std::iter::once(json!(0)))
+        .collect();
+    assert!(
+        array(integer())
+            .distinct()
+            .bail(true)
+            .check(&serde_json::Value::Array(items_17_check))
+            .is_err()
+    );
+    assert!(
+        array(integer())
+            .subset_of(&["a", "b"])
+            .check(&json!([123]))
+            .is_err()
+    );
+    assert!(
+        array(integer())
+            .contains_any(vec![json!(1), json!(2)])
+            .bail(true)
+            .check(&json!([3, 4]))
+            .is_err()
+    );
+    assert!(
+        array(integer().min(10))
+            .bail(true)
+            .check(&json!([1, 2]))
+            .is_err()
+    );
+    assert!(
+        array(integer())
+            .max_items(1)
+            .bail(true)
+            .validate_async(&json!([1, 2]))
+            .await
+            .is_err()
+    );
+
+    // 25. Maximum 100% Sweep - Completing All Remaining Modules
+    let err_builder =
+        ValidationError::new().with_issue(ValidationIssue::new("field", "rule", "msg"));
+    assert_eq!(err_builder.len(), 1);
+
+    #[derive(Debug, PartialEq, Eq)]
+    enum UnregisteredEnum {
+        VariantA,
+    }
+    impl std::str::FromStr for UnregisteredEnum {
+        type Err = String;
+        fn from_str(s: &str) -> Result<Self, Self::Err> {
+            if s == "a" {
+                Ok(UnregisteredEnum::VariantA)
+            } else {
+                Err("unknown".into())
+            }
+        }
+    }
+    let empty_enum = enum_of::<UnregisteredEnum>();
+    assert!(empty_enum.validate(&json!(123)).is_err());
+    assert!(empty_enum.validate(&json!("unknown")).is_err());
+
+    let union_with_msg = union2(string().min_len(10), string().starts_with("prefix"))
+        .with_message("custom union failure");
+    assert_eq!(
+        union_with_msg
+            .validate(&json!("xyz"))
+            .unwrap_err()
+            .first_message()
+            .unwrap(),
+        "custom union failure"
+    );
+
+    let rec_check = record(string().min_len(5)).bail(true);
+    assert!(rec_check.check(&json!(null)).is_err());
+    assert!(rec_check.check(&json!(["not an object"])).is_err());
+    assert!(
+        rec_check
+            .check_path(
+                &json!({"k": "bad"}),
+                "parent",
+                &ctx,
+                None,
+                default_messages_provider()
+            )
+            .is_err()
+    );
+
+    let tup_check = tuple2(string().min_len(5), integer().min(10)).bail(true);
+    assert!(
+        tup_check
+            .check_path(
+                &json!(["bad", 5]),
+                "pair",
+                &ctx,
+                None,
+                default_messages_provider()
+            )
+            .is_err()
+    );
+    assert!(tup_check.check(&json!(["bad", 5])).is_err());
+    let tup_nobail = tuple2(string().min_len(5), integer().min(10)).bail(false);
+    assert!(
+        tup_nobail
+            .check_path(
+                &json!(["bad", 5]),
+                "pair",
+                &ctx,
+                None,
+                default_messages_provider()
+            )
+            .is_err()
+    );
+    assert!(tup_nobail.check(&json!(["bad", 5])).is_err());
+
+    let tup3_check = tuple3(string().min_len(5), integer().min(10), boolean()).bail(true);
+    assert!(
+        tup3_check
+            .check_path(
+                &json!(["bad", 5, true]),
+                "trio",
+                &ctx,
+                None,
+                default_messages_provider()
+            )
+            .is_err()
+    );
+    assert!(tup3_check.check(&json!(["bad", 5, true])).is_err());
+    let tup3_nobail = tuple3(string().min_len(5), integer().min(10), boolean()).bail(false);
+    assert!(
+        tup3_nobail
+            .check_path(
+                &json!(["bad", 5, true]),
+                "trio",
+                &ctx,
+                None,
+                default_messages_provider()
+            )
+            .is_err()
+    );
+    assert!(tup3_nobail.check(&json!(["bad", 5, true])).is_err());
+
+    let tup4_check =
+        tuple4(string().min_len(5), integer().min(10), boolean(), integer()).bail(true);
+    assert!(
+        tup4_check
+            .check_path(
+                &json!(["bad", 5, true, 1]),
+                "quad",
+                &ctx,
+                None,
+                default_messages_provider()
+            )
+            .is_err()
+    );
+    assert!(tup4_check.check(&json!(["bad", 5, true, 1])).is_err());
+    let tup4_nobail =
+        tuple4(string().min_len(5), integer().min(10), boolean(), integer()).bail(false);
+    assert!(
+        tup4_nobail
+            .check_path(
+                &json!(["bad", 5, true, 1]),
+                "quad",
+                &ctx,
+                None,
+                default_messages_provider()
+            )
+            .is_err()
+    );
+    assert!(tup4_nobail.check(&json!(["bad", 5, true, 1])).is_err());
+
+    assert!(
+        string()
+            .optional()
+            .optional()
+            .to_json_schema()
+            .get("type")
+            .is_some()
+    );
+
+    struct CustomNoTypeSchema;
+    impl Schema<String> for CustomNoTypeSchema {
+        fn validate_path(
+            &self,
+            value: &serde_json::Value,
+            path: &str,
+            context: &ValidationContext,
+            parent_data: Option<&serde_json::Value>,
+            messages: &dyn MessagesProvider,
+        ) -> Result<String, ValidationError> {
+            let dummy = std::mem::size_of_val(&(value, path, context, parent_data, messages));
+            assert!(dummy > 0);
+            Ok("ok".to_string())
+        }
+    }
+    assert!(CustomNoTypeSchema.optional().to_json_schema().is_object());
+
+    let obj_opt = object().optional_field("name", string().min_len(5));
+    assert!(obj_opt.check(&json!({"name": "hello"})).is_ok());
+    assert!(obj_opt.check(&json!({"name": "hi"})).is_err());
+    let obj_partial = object().field("name", string().min_len(5)).partial();
+    assert!(obj_partial.check(&json!({"name": "hello"})).is_ok());
+    assert!(obj_partial.check(&json!({"name": "hi"})).is_err());
+    assert!(
+        object()
+            .strict()
+            .bail(true)
+            .validate_async(&json!({"unknown": 123}))
+            .await
+            .is_err()
+    );
+    assert!(
+        object()
+            .strict()
+            .bail(false)
+            .validate_async(&json!({"unknown": 123}))
+            .await
+            .is_err()
+    );
+    assert!(
+        object()
+            .field("opt", string().optional())
+            .validate_async(&json!({}))
+            .await
+            .is_ok()
+    );
+
+    let long_path = "a".repeat(70);
+    assert!(
+        array(string().min_len(10))
+            .validate_path(
+                &json!(["bad"]),
+                &long_path,
+                &ctx,
+                None,
+                default_messages_provider()
+            )
+            .is_err()
+    );
+    assert!(
+        array(string().min_len(10))
+            .check_path(
+                &json!(["bad"]),
+                &long_path,
+                &ctx,
+                None,
+                default_messages_provider()
+            )
+            .is_err()
+    );
+    assert!(array(integer()).max_items(1).check(&json!([1, 2])).is_err());
+    assert!(
+        array(integer())
+            .contains_any(vec![json!(1), json!(2)])
+            .check(&json!([3, 4]))
+            .is_err()
+    );
+    assert!(
+        array(integer())
+            .max_items(1)
+            .validate_async(&json!([1, 2]))
+            .await
+            .is_err()
+    );
+    let items_17_val: Vec<serde_json::Value> = (0..16)
+        .map(|i| json!(i))
+        .chain(std::iter::once(json!(0)))
+        .collect();
+    assert!(
+        array(integer())
+            .distinct()
+            .validate(&serde_json::Value::Array(items_17_val))
+            .is_err()
+    );
+
+    let empty_val_json = ValidatedRequest::default().to_value();
+    assert!(empty_val_json.as_object().unwrap().is_empty());
+
+    let parts_val = RequestParts::new()
+        .with_params(json!({"id": 1}))
+        .with_query(json!({"q": "test"}));
+    let val_req = request()
+        .params(object().field("id", integer()))
+        .query(object().field("q", string()))
+        .validate(&parts_val)
+        .unwrap();
+    let val_json = val_req.to_value();
+    assert_eq!(val_json.get("params").unwrap().get("id").unwrap(), 1);
+    assert_eq!(val_json.get("query").unwrap().get("q").unwrap(), "test");
+
+    struct FailingSerialize;
+    impl serde::Serialize for FailingSerialize {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            let dummy = std::mem::size_of_val(&serializer);
+            if dummy == usize::MAX {
+                return serializer.serialize_unit();
+            }
+            Err(serde::ser::Error::custom("fail serialization"))
+        }
+    }
+
+    struct FailingSerializeSchema;
+    impl Schema<FailingSerialize> for FailingSerializeSchema {
+        fn validate_path(
+            &self,
+            value: &serde_json::Value,
+            path: &str,
+            context: &ValidationContext,
+            parent_data: Option<&serde_json::Value>,
+            messages: &dyn MessagesProvider,
+        ) -> Result<FailingSerialize, ValidationError> {
+            let dummy = std::mem::size_of_val(&(value, path, context, parent_data, messages));
+            assert!(dummy > 0);
+            Ok(FailingSerialize)
+        }
+
+        fn validate_async_path<'a>(
+            &'a self,
+            value: &'a serde_json::Value,
+            path: &'a str,
+            context: &'a ValidationContext,
+            parent_data: Option<&'a serde_json::Value>,
+            messages: &'a dyn MessagesProvider,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<FailingSerialize, ValidationError>>
+                    + Send
+                    + 'a,
+            >,
+        > {
+            let dummy = std::mem::size_of_val(&(value, path, context, parent_data, messages));
+            assert!(dummy > 0);
+            Box::pin(async move { Ok(FailingSerialize) })
+        }
+    }
+    assert!(
+        request()
+            .query(FailingSerializeSchema)
+            .validate(&RequestParts::new().with_query(json!(1.0)))
+            .is_err()
+    );
+    assert!(
+        request()
+            .query(FailingSerializeSchema)
+            .validate_async(&RequestParts::new().with_query(json!(1.0)))
+            .await
+            .is_err()
+    );
+
+    assert!(
+        number()
+            .rule_async(FailingAsyncNumRule)
+            .bail(false)
+            .validate_async(&json!(5.0))
+            .await
+            .is_err()
+    );
+    assert!(number().multiple_of(f64::NAN).to_json_schema().is_object());
+
+    let req_int = request().query(integer());
+    let parts_int = RequestParts::new().with_query(json!(42));
+    assert_eq!(
+        req_int.validate(&parts_int).unwrap().query.unwrap(),
+        json!(42)
+    );
+    assert_eq!(
+        req_int
+            .validate_async(&parts_int)
+            .await
+            .unwrap()
+            .query
+            .unwrap(),
+        json!(42)
+    );
+
+    let req_san = request()
+        .params(object().field("id", integer()))
+        .sanitize(true);
+    let parts_san = RequestParts::new().with_params(json!({"id": 1}));
+    assert_eq!(
+        req_san
+            .validate_async(&parts_san)
+            .await
+            .unwrap()
+            .params
+            .unwrap(),
+        json!({"id": 1})
+    );
+
+    let req_schema_obj = request()
+        .params(object().field("id", integer().min(10)))
+        .sanitize(true)
+        .bail(true);
+    let dyn_req: &dyn Schema<ValidatedRequest> = &req_schema_obj;
+    assert!(
+        dyn_req
+            .validate_path(
+                &json!({"params": {"id": 1}}),
+                "envelope",
+                &ctx,
+                None,
+                default_messages_provider()
+            )
+            .is_err()
+    );
+    let req_schema_nobail = request()
+        .params(object().field("id", integer().min(10)))
+        .sanitize(true);
+    let dyn_req_nobail: &dyn Schema<ValidatedRequest> = &req_schema_nobail;
+    assert!(
+        dyn_req_nobail
+            .validate_path(
+                &json!({"params": {"id": 1}}),
+                "envelope",
+                &ctx,
+                None,
+                default_messages_provider()
+            )
+            .is_err()
+    );
+
+    // StringSchema fast-path zero-alloc sweep
+    let fast = string().trim(false);
+    assert!(fast.clone().min_len(2).check_str("hello").is_ok());
+    assert!(fast.clone().min_len(5).check_str("hi").is_err());
+    assert!(fast.clone().min_len(2).check_str("你好").is_ok());
+    assert!(fast.clone().min_len(5).check_str("你好").is_err());
+
+    assert!(fast.clone().max_len(5).check_str("hello").is_ok());
+    assert!(fast.clone().max_len(2).check_str("hello").is_err());
+    assert!(fast.clone().max_len(2).check_str("你好").is_ok());
+    assert!(fast.clone().max_len(1).check_str("你好").is_err());
+
+    assert!(fast.clone().exact_len(2).check_str("你好").is_ok());
+    assert!(fast.clone().exact_len(5).check_str("hello").is_ok());
+    assert!(fast.clone().exact_len(5).check_str("hi").is_err());
+    assert!(fast.clone().exact_len(2).check_str("hello").is_err());
+    assert!(fast.clone().exact_len(1).check_str("你好").is_err());
+
+    assert!(fast.clone().email().check_str("user@example.com").is_ok());
+    assert!(fast.clone().email().check_str("not_email").is_err());
+    let long_domain_email = format!("user@{}.com", "a".repeat(252));
+    assert!(fast.clone().email().check_str(&long_domain_email).is_err());
+
+    assert!(fast.clone().url().check_str("https://example.com").is_ok());
+    assert!(fast.clone().url().check_str("not_url").is_err());
+
+    assert!(
+        fast.clone()
+            .uuid()
+            .check_str("a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11")
+            .is_ok()
+    );
+    assert!(fast.clone().uuid().check_str("not-uuid").is_err());
+
+    assert!(fast.clone().ip().check_str("127.0.0.1").is_ok());
+    assert!(fast.clone().ip().check_str("::1").is_ok());
+    assert!(fast.clone().ip().check_str("not-ip").is_err());
+
+    assert!(fast.clone().ipv4().check_str("127.0.0.1").is_ok());
+    assert!(fast.clone().ipv4().check_str("999.999.999.999").is_err());
+    assert!(fast.clone().ipv4().check_str("1.2.3").is_err());
+    assert!(fast.clone().ipv4().check_str("1.2.3.4.5").is_err());
+    assert!(fast.clone().ipv4().check_str("1.02.3.4").is_err());
+    assert!(fast.clone().ipv4().check_str("1.2.3.a").is_err());
+
+    assert!(fast.clone().ipv6().check_str("::1").is_ok());
+    assert!(fast.clone().ipv6().check_str("not_ipv6").is_err());
+
+    assert!(fast.clone().date().check_str("2026-03-30").is_ok());
+    assert!(fast.clone().date().check_str("bad-date").is_err());
+
+    assert!(fast.clone().time().check_str("12:00:00").is_ok());
+    assert!(fast.clone().time().check_str("bad-time").is_err());
+
+    assert!(
+        fast.clone()
+            .datetime()
+            .check_str("2026-03-30T12:00:00Z")
+            .is_ok()
+    );
+    assert!(fast.clone().datetime().check_str("bad-datetime").is_err());
+
+    assert!(
+        fast.clone()
+            .credit_card()
+            .check_str("4532015112830366")
+            .is_ok()
+    );
+    assert!(fast.clone().credit_card().check_str("bad-cc").is_err());
+
+    assert!(
+        fast.clone()
+            .ulid()
+            .check_str("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+            .is_ok()
+    );
+    assert!(fast.clone().ulid().check_str("bad-ulid").is_err());
+
+    assert!(fast.clone().hex_color().check_str("#ffffff").is_ok());
+    assert!(fast.clone().hex_color().check_str("bad-color").is_err());
+
+    assert!(fast.clone().slug().check_str("valid-slug-123").is_ok());
+    assert!(fast.clone().slug().check_str("Invalid Slug").is_err());
+
+    assert!(fast.clone().semver().check_str("1.2.3").is_ok());
+    assert!(fast.clone().semver().check_str("bad-semver").is_err());
+
+    assert!(fast.clone().base64().check_str("YQ==").is_ok());
+    assert!(fast.clone().base64().check_str("QQ==").is_ok());
+    assert!(fast.clone().base64().check_str("bad-b64!").is_err());
+
+    assert!(fast.clone().starts_with("abc").check_str("abcdef").is_ok());
+    assert!(fast.clone().starts_with("abc").check_str("xyz").is_err());
+
+    assert!(fast.clone().ends_with("def").check_str("abcdef").is_ok());
+    assert!(fast.clone().ends_with("def").check_str("xyz").is_err());
+
+    assert!(fast.clone().contains("cd").check_str("abcdef").is_ok());
+    assert!(fast.clone().contains("cd").check_str("xyz").is_err());
+
+    assert!(fast.clone().alpha().check_str("abc").is_ok());
+    assert!(fast.clone().alpha().check_str("é").is_ok());
+    assert!(fast.clone().alpha().check_str("").is_err());
+    assert!(fast.clone().alpha().check_str("123").is_err());
+
+    assert!(fast.clone().alphanumeric().check_str("abc1").is_ok());
+    assert!(fast.clone().alphanumeric().check_str("é1").is_ok());
+    assert!(fast.clone().alphanumeric().check_str("").is_err());
+    assert!(fast.clone().alphanumeric().check_str("abc!").is_err());
+
+    assert!(fast.clone().ascii().check_str("abc").is_ok());
+    assert!(fast.clone().ascii().check_str("é").is_err());
+    assert!(fast.clone().ipv4().check_str("1..2.3").is_err());
+    assert!(fast.clone().regex("^abc$").check_str("abc").is_ok());
+    assert!(
+        fast.clone()
+            .does_not_contain("xyz")
+            .check_str("abc")
+            .is_ok()
+    );
+    assert!(fast.clone().country_code().check_str("US").is_ok());
+    assert!(fast.clone().currency_code().check_str("USD").is_ok());
+    assert!(
+        fast.clone()
+            .cuid()
+            .check_str("c123456789012345678901234")
+            .is_ok()
+    );
+    assert!(fast.clone().nanoid_len(5).check_str("abcde").is_ok());
+    assert!(fast.clone().hex().check_str("deadbeef").is_ok());
+    assert!(fast.clone().digits().check_str("12345").is_ok());
+    assert!(fast.clone().min_words(2).check_str("hello world").is_ok());
+
+    assert_eq!(string().trim(false).validate_str("hello").unwrap(), "hello");
+    assert!(
+        string()
+            .trim(false)
+            .min_len(10)
+            .check_path(
+                &json!("short"),
+                "f",
+                &ctx,
+                None,
+                default_messages_provider()
+            )
+            .is_err()
+    );
+    assert!(
+        string()
+            .mac_address()
+            .check_str("00/11/22/33/44/55")
+            .is_err()
+    );
+    assert!(string().rgb().check_str("cmyk(1, 2, 3)").is_err());
+    assert!(string().hsl().check_str("cmyk(1, 2, 3)").is_err());
+    assert!(string().hsla().check_str("hsla(not_closed").is_err());
+
+    assert!(
+        fast.clone()
+            .min_len(2)
+            .check_path(
+                &json!("hello"),
+                "field",
+                &ctx,
+                None,
+                default_messages_provider()
+            )
+            .is_ok()
+    );
+
+    let s_dyn_check: &dyn Schema<String> = &string()
+        .trim(false)
+        .trim_start()
+        .trim_end()
+        .to_uppercase()
+        .normalize_email()
+        .escape_html()
+        .min_len(2)
+        .bail(true);
+    assert!(
+        s_dyn_check
+            .check_path(
+                &json!("  HELLO@TEST.COM <tag>  "),
+                "val",
+                &ctx,
+                None,
+                default_messages_provider()
+            )
+            .is_ok()
+    );
+    let s_dyn_fail: &dyn Schema<String> =
+        &string().trim(false).to_uppercase().min_len(10).bail(true);
+    assert!(
+        s_dyn_fail
+            .check_path(
+                &json!("short"),
+                "val",
+                &ctx,
+                None,
+                default_messages_provider()
+            )
+            .is_err()
+    );
+
+    assert!(
+        string()
+            .mac_address()
+            .check_str("00:1A:2B:3C:4D:GG")
+            .is_err()
+    );
+    assert!(string().iban().check_str("GB82WEST1234569876543!").is_err());
+    assert!(string().isin().check_str("US037833100!").is_err());
+    assert!(string().rgb().check_str("rgba(255, 0, 0, 0.5)").is_ok());
+    assert!(string().rgb().check_str("rgb(255 0 bad)").is_err());
+    assert!(
+        string()
+            .hsl()
+            .check_str("hsla(120, 100%, 50%, 0.8)")
+            .is_ok()
+    );
+    assert!(string().hsl().check_str("hsl(120, 100%)").is_err());
+    assert!(string().issn().check_str("1234-567!").is_err());
+    assert!(string().exact_len(2).validate(&json!("你好")).is_ok());
+    assert!(string().exact_len(2).validate(&json!("你好世界")).is_err());
+}

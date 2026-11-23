@@ -114,3 +114,40 @@ fn test_request_schema_cookies_and_headers() {
     assert!(fields.contains(&"headers.authorization"));
     assert!(fields.contains(&"cookies.session_token"));
 }
+
+#[test]
+fn test_request_schema_as_standard_schema_and_parts_conversion() {
+    let req_schema = request()
+        .params(object().field("id", integer()))
+        .query(object().field("q", string()));
+
+    let input_value = json!({
+        "params": { "id": 123 },
+        "query": { "q": "rust" }
+    });
+
+    let validated =
+        <RequestSchema as Schema<ValidatedRequest>>::validate(&req_schema, &input_value).unwrap();
+    assert_eq!(validated.params.as_ref().unwrap()["id"], 123);
+    assert_eq!(validated.query.as_ref().unwrap()["q"], "rust");
+
+    let val = validated.to_value();
+    assert_eq!(val["params"]["id"], 123);
+    assert_eq!(val["query"]["q"], "rust");
+
+    let parts = RequestParts::from(&input_value);
+    assert_eq!(parts.params["id"], 123);
+    let converted_back: serde_json::Value = parts.into();
+    assert_eq!(converted_back["params"]["id"], 123);
+}
+
+#[test]
+fn test_request_schema_sanitization() {
+    let req_schema = request()
+        .sanitize(true)
+        .query(object().field("search", string().without_trim()));
+
+    let parts = RequestParts::new().with_query(json!({ "search": "   trimmed_query   " }));
+    let validated = req_schema.validate(&parts).unwrap();
+    assert_eq!(validated.query.unwrap()["search"], "trimmed_query");
+}

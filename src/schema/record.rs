@@ -94,9 +94,9 @@ where
 
         for (key, val) in map {
             let entry_path = if path.is_empty() {
-                key.clone()
+                std::borrow::Cow::Borrowed(key.as_str())
             } else {
-                format!("{path}.{key}")
+                std::borrow::Cow::Owned(format!("{path}.{key}"))
             };
 
             match self
@@ -117,6 +117,64 @@ where
 
         if errors.is_empty() {
             Ok(validated_map)
+        } else {
+            Err(errors)
+        }
+    }
+
+    fn check_path(
+        &self,
+        value: &Value,
+        path: &str,
+        context: &ValidationContext,
+        parent_data: Option<&Value>,
+        messages: &dyn MessagesProvider,
+    ) -> Result<(), ValidationError> {
+        let rule_ctx = RuleContext::new(path, context, parent_data, messages);
+        let inline = self.inline_message.as_deref();
+
+        let map = match value {
+            Value::Object(obj) => obj,
+            Value::Null => {
+                let issue = rule_ctx.create_issue("required", RuleParams::new(), inline);
+                return Err(ValidationError::single(
+                    issue.field,
+                    issue.rule,
+                    issue.message,
+                ));
+            }
+            _ => {
+                let issue = rule_ctx.create_issue("required", RuleParams::new(), inline);
+                return Err(ValidationError::single(
+                    issue.field,
+                    issue.rule,
+                    issue.message,
+                ));
+            }
+        };
+
+        let mut errors = ValidationError::new();
+
+        for (key, val) in map {
+            let entry_path = if path.is_empty() {
+                std::borrow::Cow::Borrowed(key.as_str())
+            } else {
+                std::borrow::Cow::Owned(format!("{path}.{key}"))
+            };
+
+            if let Err(entry_err) =
+                self.value_schema
+                    .check_path(val, &entry_path, context, Some(value), messages)
+            {
+                errors.merge(entry_err);
+                if self.bail_on_fail {
+                    return Err(errors);
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
         } else {
             Err(errors)
         }

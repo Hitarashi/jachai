@@ -135,4 +135,12 @@ mod async_tests {
         assert_eq!(err.issues()[0].rule, "refine_async");
         assert_eq!(err.issues()[0].message, "Reserved username.");
     }
+
+    #[tokio::test]
+    async fn test_native_rust_tuple_async_validation() {
+        let schema = (string().min_len(2), integer().positive(), boolean());
+        let valid = json!(["world", 100, true]);
+        let result = schema.validate_async(&valid).await.unwrap();
+        assert_eq!(result, ("world".to_string(), 100, true));
+    }
 }

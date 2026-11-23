@@ -165,6 +165,39 @@ impl Schema<String> for DateSchema {
         Ok(s.to_string())
     }
 
+    fn check_path(
+        &self,
+        value: &Value,
+        path: &str,
+        context: &ValidationContext,
+        parent_data: Option<&Value>,
+        messages: &dyn MessagesProvider,
+    ) -> Result<(), ValidationError> {
+        let s = match value {
+            Value::String(s) => s.as_str(),
+            _ => {
+                return self
+                    .validate_path(value, path, context, parent_data, messages)
+                    .map(|_| ());
+            }
+        };
+
+        let is_valid = match self.format {
+            DateFormat::DateTime => is_valid_rfc3339_datetime(s),
+            DateFormat::DateOnly => is_valid_rfc3339_date(s),
+            DateFormat::TimeOnly => is_valid_rfc3339_time(s),
+            DateFormat::Duration => is_valid_iso8601_duration(s),
+        };
+
+        if !is_valid || self.must_be_weekend || self.must_be_weekday {
+            return self
+                .validate_path(value, path, context, parent_data, messages)
+                .map(|_| ());
+        }
+
+        Ok(())
+    }
+
     fn to_json_schema_value(&self) -> Value {
         let mut map = serde_json::Map::new();
         map.insert("type".to_string(), Value::String("string".to_string()));

@@ -1,6 +1,6 @@
 //! Object schema builder for validating structured dictionaries, cross-field rules, and fail-closed security.
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
 #[cfg(feature = "async")]
 use futures_util::future::BoxFuture;
@@ -8,10 +8,11 @@ use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
 use crate::{
+    coercion::Coercer,
     context::ValidationContext,
     error::{RuleParams, ValidationError, ValidationIssue},
     messages::{MessagesProvider, SimpleMessagesProvider},
-    rule::RuleContext,
+    rule::{CrossFieldRuleValidator, RuleContext},
     schema::Schema,
 };
 
@@ -63,28 +64,28 @@ trait ErasedField: Send + Sync {
 
 #[inline]
 fn typed_to_value<T: serde::Serialize + 'static>(
-    typed: T,
+    mut typed: T,
     path: &str,
 ) -> Result<Value, ValidationError> {
-    let any_ref = &typed as &dyn std::any::Any;
-    if let Some(v) = any_ref.downcast_ref::<Value>() {
-        return Ok(v.clone());
+    let any_mut = &mut typed as &mut dyn std::any::Any;
+    if let Some(v) = any_mut.downcast_mut::<Value>() {
+        return Ok(std::mem::take(v));
     }
-    if let Some(s) = any_ref.downcast_ref::<String>() {
-        return Ok(Value::String(s.clone()));
+    if let Some(s) = any_mut.downcast_mut::<String>() {
+        return Ok(Value::String(std::mem::take(s)));
     }
-    if let Some(n) = any_ref.downcast_ref::<i64>() {
+    if let Some(n) = any_mut.downcast_mut::<i64>() {
         return Ok(Value::Number((*n).into()));
     }
-    if let Some(n) = any_ref.downcast_ref::<u64>() {
+    if let Some(n) = any_mut.downcast_mut::<u64>() {
         return Ok(Value::Number((*n).into()));
     }
-    if let Some(n) = any_ref.downcast_ref::<f64>() {
+    if let Some(n) = any_mut.downcast_mut::<f64>() {
         return Ok(serde_json::Number::from_f64(*n)
             .map(Value::Number)
             .unwrap_or(Value::Null));
     }
-    if let Some(b) = any_ref.downcast_ref::<bool>() {
+    if let Some(b) = any_mut.downcast_mut::<bool>() {
         return Ok(Value::Bool(*b));
     }
     serde_json::to_value(&typed).map_err(|err| {
@@ -324,7 +325,7 @@ enum CrossFieldRule {
     },
 }
 
-impl CrossFieldRule {
+impl CrossFieldRuleValidator for CrossFieldRule {
     fn evaluate(
         &self,
         map: &Map<String, Value>,
@@ -932,13 +933,13 @@ impl CrossFieldRule {
 /// Fluent schema builder for validating JSON objects, maps, and domain structures.
 #[derive(Clone)]
 pub struct ObjectSchema {
-    fields: BTreeMap<String, Arc<dyn ErasedField>>,
-    field_order: Vec<String>,
+    fields: Vec<(String, Arc<dyn ErasedField>)>,
     unknown_policy: UnknownFieldPolicy,
-    cross_rules: Vec<CrossFieldRule>,
+    cross_rules: Vec<Arc<dyn CrossFieldRuleValidator>>,
     custom_messages: SimpleMessagesProvider,
     bail_on_fail: bool,
     inline_message: Option<String>,
+    coercer: Option<Coercer>,
 }
 
 impl Default for ObjectSchema {
@@ -952,13 +953,13 @@ impl ObjectSchema {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            fields: BTreeMap::new(),
-            field_order: Vec::new(),
+            fields: Vec::new(),
             unknown_policy: UnknownFieldPolicy::Strip,
             cross_rules: Vec::new(),
             custom_messages: SimpleMessagesProvider::default(),
             bail_on_fail: false,
             inline_message: None,
+            coercer: None,
         }
     }
 
@@ -970,15 +971,16 @@ impl ObjectSchema {
         T: serde::Serialize + Send + Sync + 'static,
     {
         let field_name = name.into();
-        let entry = FieldEntry {
+        let entry = Arc::new(FieldEntry {
             schema,
             optional: false,
             phantom: std::marker::PhantomData,
-        };
-        if !self.field_order.contains(&field_name) {
-            self.field_order.push(field_name.clone());
+        });
+        if let Some(existing) = self.fields.iter_mut().find(|(k, _)| k == &field_name) {
+            existing.1 = entry;
+        } else {
+            self.fields.push((field_name, entry));
         }
-        self.fields.insert(field_name, Arc::new(entry));
         self
     }
 
@@ -990,15 +992,16 @@ impl ObjectSchema {
         T: serde::Serialize + Send + Sync + 'static,
     {
         let field_name = name.into();
-        let entry = FieldEntry {
+        let entry = Arc::new(FieldEntry {
             schema,
             optional: true,
             phantom: std::marker::PhantomData,
-        };
-        if !self.field_order.contains(&field_name) {
-            self.field_order.push(field_name.clone());
+        });
+        if let Some(existing) = self.fields.iter_mut().find(|(k, _)| k == &field_name) {
+            existing.1 = entry;
+        } else {
+            self.fields.push((field_name, entry));
         }
-        self.fields.insert(field_name, Arc::new(entry));
         self
     }
 
@@ -1057,22 +1060,23 @@ impl ObjectSchema {
     /// Asserts that `field` and `other` contain identical values (e.g. password confirmation).
     #[must_use]
     pub fn same_as(mut self, field: impl Into<String>, other: impl Into<String>) -> Self {
-        self.cross_rules.push(CrossFieldRule::SameAs {
+        self.cross_rules.push(Arc::new(CrossFieldRule::SameAs {
             field: field.into(),
             other: other.into(),
             custom_message: None,
-        });
+        }));
         self
     }
 
     /// Asserts that `field` and `other` contain different values.
     #[must_use]
     pub fn different_from(mut self, field: impl Into<String>, other: impl Into<String>) -> Self {
-        self.cross_rules.push(CrossFieldRule::DifferentFrom {
-            field: field.into(),
-            other: other.into(),
-            custom_message: None,
-        });
+        self.cross_rules
+            .push(Arc::new(CrossFieldRule::DifferentFrom {
+                field: field.into(),
+                other: other.into(),
+                custom_message: None,
+            }));
         self
     }
 
@@ -1084,45 +1088,46 @@ impl ObjectSchema {
         other: impl Into<String>,
         expected: impl Into<Value>,
     ) -> Self {
-        self.cross_rules.push(CrossFieldRule::RequiredIf {
+        self.cross_rules.push(Arc::new(CrossFieldRule::RequiredIf {
             field: field.into(),
             other: other.into(),
             expected: expected.into(),
             custom_message: None,
-        });
+        }));
         self
     }
 
     /// Asserts that `field` is present and non-null when `other` is absent or null.
     #[must_use]
     pub fn required_without(mut self, field: impl Into<String>, other: impl Into<String>) -> Self {
-        self.cross_rules.push(CrossFieldRule::RequiredWithout {
-            field: field.into(),
-            other: other.into(),
-            custom_message: None,
-        });
+        self.cross_rules
+            .push(Arc::new(CrossFieldRule::RequiredWithout {
+                field: field.into(),
+                other: other.into(),
+                custom_message: None,
+            }));
         self
     }
 
     /// Asserts that `field` is temporally or numerically after `other`.
     #[must_use]
     pub fn after_field(mut self, field: impl Into<String>, other: impl Into<String>) -> Self {
-        self.cross_rules.push(CrossFieldRule::AfterField {
+        self.cross_rules.push(Arc::new(CrossFieldRule::AfterField {
             field: field.into(),
             other: other.into(),
             custom_message: None,
-        });
+        }));
         self
     }
 
     /// Asserts that `field` is temporally or numerically before `other`.
     #[must_use]
     pub fn before_field(mut self, field: impl Into<String>, other: impl Into<String>) -> Self {
-        self.cross_rules.push(CrossFieldRule::BeforeField {
+        self.cross_rules.push(Arc::new(CrossFieldRule::BeforeField {
             field: field.into(),
             other: other.into(),
             custom_message: None,
-        });
+        }));
         self
     }
 
@@ -1145,11 +1150,12 @@ impl ObjectSchema {
     /// Asserts that `field` is present and non-null when `other` is present and non-null.
     #[must_use]
     pub fn required_with(mut self, field: impl Into<String>, other: impl Into<String>) -> Self {
-        self.cross_rules.push(CrossFieldRule::RequiredWith {
-            field: field.into(),
-            other: other.into(),
-            custom_message: None,
-        });
+        self.cross_rules
+            .push(Arc::new(CrossFieldRule::RequiredWith {
+                field: field.into(),
+                other: other.into(),
+                custom_message: None,
+            }));
         self
     }
 
@@ -1161,58 +1167,61 @@ impl ObjectSchema {
         other: impl Into<String>,
         expected: impl Into<Value>,
     ) -> Self {
-        self.cross_rules.push(CrossFieldRule::ProhibitedIf {
-            field: field.into(),
-            other: other.into(),
-            expected: expected.into(),
-            custom_message: None,
-        });
+        self.cross_rules
+            .push(Arc::new(CrossFieldRule::ProhibitedIf {
+                field: field.into(),
+                other: other.into(),
+                expected: expected.into(),
+                custom_message: None,
+            }));
         self
     }
 
     /// Asserts that `field` and `other` cannot both be present and non-null simultaneously.
     #[must_use]
     pub fn prohibited_with(mut self, field: impl Into<String>, other: impl Into<String>) -> Self {
-        self.cross_rules.push(CrossFieldRule::ProhibitedWith {
-            field: field.into(),
-            other: other.into(),
-            custom_message: None,
-        });
+        self.cross_rules
+            .push(Arc::new(CrossFieldRule::ProhibitedWith {
+                field: field.into(),
+                other: other.into(),
+                custom_message: None,
+            }));
         self
     }
 
     /// Asserts that `field` is temporally after `other` based on RFC 3339 timestamp parsing.
     #[must_use]
     pub fn after_date_field(mut self, field: impl Into<String>, other: impl Into<String>) -> Self {
-        self.cross_rules.push(CrossFieldRule::AfterDateField {
-            field: field.into(),
-            other: other.into(),
-            custom_message: None,
-        });
+        self.cross_rules
+            .push(Arc::new(CrossFieldRule::AfterDateField {
+                field: field.into(),
+                other: other.into(),
+                custom_message: None,
+            }));
         self
     }
 
     /// Asserts that `field` is temporally before `other` based on RFC 3339 timestamp parsing.
     #[must_use]
     pub fn before_date_field(mut self, field: impl Into<String>, other: impl Into<String>) -> Self {
-        self.cross_rules.push(CrossFieldRule::BeforeDateField {
-            field: field.into(),
-            other: other.into(),
-            custom_message: None,
-        });
+        self.cross_rules
+            .push(Arc::new(CrossFieldRule::BeforeDateField {
+                field: field.into(),
+                other: other.into(),
+                custom_message: None,
+            }));
         self
     }
 
     /// Extends this schema by merging another schema's fields and cross-field rules.
     #[must_use]
     pub fn extend(mut self, other: Self) -> Self {
-        for name in &other.field_order {
-            if !self.field_order.contains(name) {
-                self.field_order.push(name.clone());
-            }
-        }
         for (name, field_def) in other.fields {
-            self.fields.insert(name, field_def);
+            if let Some(existing) = self.fields.iter_mut().find(|(k, _)| k == &name) {
+                existing.1 = field_def;
+            } else {
+                self.fields.push((name, field_def));
+            }
         }
         self.cross_rules.extend(other.cross_rules);
         self
@@ -1229,8 +1238,7 @@ impl ObjectSchema {
     /// Derives a new `ObjectSchema` retaining only the specified field keys.
     #[must_use]
     pub fn pick(mut self, keys: &[&str]) -> Self {
-        self.field_order.retain(|k| keys.contains(&k.as_str()));
-        self.fields.retain(|k, _| keys.contains(&k.as_str()));
+        self.fields.retain(|(k, _)| keys.contains(&k.as_str()));
         self.cross_rules.retain(|rule| rule.references_only(keys));
         self
     }
@@ -1238,8 +1246,7 @@ impl ObjectSchema {
     /// Derives a new `ObjectSchema` excluding the specified field keys.
     #[must_use]
     pub fn omit(mut self, keys: &[&str]) -> Self {
-        self.field_order.retain(|k| !keys.contains(&k.as_str()));
-        self.fields.retain(|k, _| !keys.contains(&k.as_str()));
+        self.fields.retain(|(k, _)| !keys.contains(&k.as_str()));
         self.cross_rules.retain(|rule| !rule.references_any(keys));
         self
     }
@@ -1247,7 +1254,7 @@ impl ObjectSchema {
     /// Derives a new `ObjectSchema` where all declared fields are converted to optional.
     #[must_use]
     pub fn partial(mut self) -> Self {
-        for field_def in self.fields.values_mut() {
+        for (_, field_def) in &mut self.fields {
             if !field_def.is_optional() {
                 *field_def = Arc::new(OptionalWrapper {
                     inner: field_def.clone(),
@@ -1265,74 +1272,168 @@ impl ObjectSchema {
         other: impl Into<String>,
         expected: impl Into<Value>,
     ) -> Self {
-        self.cross_rules.push(CrossFieldRule::RequiredUnless {
-            field: field.into(),
-            other: other.into(),
-            expected: expected.into(),
-            custom_message: None,
-        });
+        self.cross_rules
+            .push(Arc::new(CrossFieldRule::RequiredUnless {
+                field: field.into(),
+                other: other.into(),
+                expected: expected.into(),
+                custom_message: None,
+            }));
         self
     }
 
     /// Asserts that `field` is present and non-null when ALL fields in `others` are present and non-null.
     #[must_use]
     pub fn required_with_all(mut self, field: impl Into<String>, others: &[&str]) -> Self {
-        self.cross_rules.push(CrossFieldRule::RequiredWithAll {
-            field: field.into(),
-            others: others.iter().map(|s| (*s).to_string()).collect(),
-            custom_message: None,
-        });
+        self.cross_rules
+            .push(Arc::new(CrossFieldRule::RequiredWithAll {
+                field: field.into(),
+                others: others.iter().map(|s| (*s).to_string()).collect(),
+                custom_message: None,
+            }));
         self
     }
 
     /// Asserts that `field` is present and non-null when NONE of the fields in `others` are present.
     #[must_use]
     pub fn required_without_all(mut self, field: impl Into<String>, others: &[&str]) -> Self {
-        self.cross_rules.push(CrossFieldRule::RequiredWithoutAll {
-            field: field.into(),
-            others: others.iter().map(|s| (*s).to_string()).collect(),
-            custom_message: None,
-        });
+        self.cross_rules
+            .push(Arc::new(CrossFieldRule::RequiredWithoutAll {
+                field: field.into(),
+                others: others.iter().map(|s| (*s).to_string()).collect(),
+                custom_message: None,
+            }));
         self
     }
 
     /// Enforces that at least one of the specified fields is present and non-empty.
     #[must_use]
     pub fn at_least_one_of(mut self, fields: &[&str]) -> Self {
-        self.cross_rules.push(CrossFieldRule::AtLeastOneOf {
-            fields: fields.iter().map(|s| (*s).to_string()).collect(),
-            custom_message: None,
-        });
+        self.cross_rules
+            .push(Arc::new(CrossFieldRule::AtLeastOneOf {
+                fields: fields.iter().map(|s| (*s).to_string()).collect(),
+                custom_message: None,
+            }));
         self
     }
 
     /// Enforces that exactly one of the specified fields is present and non-empty.
     #[must_use]
     pub fn exactly_one_of(mut self, fields: &[&str]) -> Self {
-        self.cross_rules.push(CrossFieldRule::ExactlyOneOf {
-            fields: fields.iter().map(|s| (*s).to_string()).collect(),
-            custom_message: None,
-        });
+        self.cross_rules
+            .push(Arc::new(CrossFieldRule::ExactlyOneOf {
+                fields: fields.iter().map(|s| (*s).to_string()).collect(),
+                custom_message: None,
+            }));
         self
     }
 
     /// Enforces that the specified fields are mutually exclusive (at most one may be present and non-empty).
     #[must_use]
     pub fn mutually_exclusive(mut self, fields: &[&str]) -> Self {
-        self.cross_rules.push(CrossFieldRule::MutuallyExclusive {
-            fields: fields.iter().map(|s| (*s).to_string()).collect(),
-            custom_message: None,
-        });
+        self.cross_rules
+            .push(Arc::new(CrossFieldRule::MutuallyExclusive {
+                fields: fields.iter().map(|s| (*s).to_string()).collect(),
+                custom_message: None,
+            }));
         self
     }
 
     /// Asserts that `{field}_confirmation` is present and matches `{field}`.
     #[must_use]
     pub fn confirmed(mut self, field: impl Into<String>) -> Self {
-        self.cross_rules.push(CrossFieldRule::Confirmed {
+        self.cross_rules.push(Arc::new(CrossFieldRule::Confirmed {
             field: field.into(),
             custom_message: None,
-        });
+        }));
+        self
+    }
+
+    /// Attaches an arbitrary custom multi-field rule implementing `CrossFieldRuleValidator`.
+    #[must_use]
+    pub fn cross_rule<R: CrossFieldRuleValidator + 'static>(mut self, rule: R) -> Self {
+        self.cross_rules.push(Arc::new(rule));
+        self
+    }
+
+    /// Attaches a custom closure-based multi-field refinement rule.
+    #[must_use]
+    pub fn cross_refine<F>(
+        mut self,
+        fields: &[&str],
+        predicate: F,
+        rule_name: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self
+    where
+        F: Fn(&Map<String, Value>) -> bool + Send + Sync + 'static,
+    {
+        struct ClosureCrossRule<F> {
+            fields: Vec<String>,
+            predicate: F,
+            rule_name: String,
+            message: String,
+        }
+
+        impl<F> CrossFieldRuleValidator for ClosureCrossRule<F>
+        where
+            F: Fn(&Map<String, Value>) -> bool + Send + Sync + 'static,
+        {
+            fn evaluate(
+                &self,
+                map: &Map<String, Value>,
+                path: &str,
+                rule_ctx: &RuleContext<'_>,
+            ) -> Option<ValidationIssue> {
+                if !(self.predicate)(map) {
+                    let target_field = self.fields.first().map(String::as_str).unwrap_or("");
+                    let full_path = qualify_path(path, target_field);
+                    let mut params = RuleParams::new();
+                    params.insert("fields", self.fields.join(", "));
+                    Some(rule_ctx.create_issue_at(
+                        &full_path,
+                        &self.rule_name,
+                        params,
+                        Some(&self.message),
+                    ))
+                } else {
+                    None
+                }
+            }
+
+            fn references_only(&self, keys: &[&str]) -> bool {
+                self.fields.iter().all(|f| keys.contains(&f.as_str()))
+            }
+
+            fn references_any(&self, keys: &[&str]) -> bool {
+                self.fields.iter().any(|f| keys.contains(&f.as_str()))
+            }
+        }
+
+        self.cross_rules.push(Arc::new(ClosureCrossRule {
+            fields: fields.iter().map(|s| (*s).to_string()).collect(),
+            predicate,
+            rule_name: rule_name.into(),
+            message: message.into(),
+        }));
+        self
+    }
+
+    /// Configures a `Coercer` for in-place pre-sanitization of the object payload before field validation.
+    #[must_use]
+    pub fn coercer(mut self, coercer: Coercer) -> Self {
+        self.coercer = Some(coercer);
+        self
+    }
+
+    /// Enables or disables in-place pre-sanitization of the object payload before field validation.
+    #[must_use]
+    pub fn sanitize(mut self, enabled: bool) -> Self {
+        if enabled {
+            self.coercer = Some(Coercer::default());
+        } else {
+            self.coercer = None;
+        }
         self
     }
 
@@ -1411,8 +1512,22 @@ impl ObjectSchema {
         let rule_ctx = RuleContext::new(path, context, parent_data, &composite);
         let inline = self.inline_message.as_deref();
 
+        let sanitized_storage;
         let map = match value {
-            Value::Object(obj) => obj,
+            Value::Object(obj) => {
+                if let Some(coercer) = &self.coercer {
+                    let mut cloned = value.clone();
+                    coercer.sanitize_in_place(&mut cloned);
+                    sanitized_storage = cloned;
+                    if let Value::Object(ref sanitized_obj) = sanitized_storage {
+                        sanitized_obj
+                    } else {
+                        obj
+                    }
+                } else {
+                    obj
+                }
+            }
             Value::Null => {
                 let issue = rule_ctx.create_issue("required", RuleParams::new(), inline);
                 return Err(ValidationError::single(
@@ -1435,7 +1550,7 @@ impl ObjectSchema {
 
         if self.unknown_policy == UnknownFieldPolicy::Strict {
             for key in map.keys() {
-                if !self.fields.contains_key(key) {
+                if !self.fields.iter().any(|(k, _)| k == key) {
                     let field_path = qualify_path(path, key);
                     let mut params = RuleParams::new();
                     params.insert("field", key.clone());
@@ -1499,6 +1614,17 @@ impl ObjectSchema {
 }
 
 impl Schema<Value> for ObjectSchema {
+    fn check_path(
+        &self,
+        value: &Value,
+        path: &str,
+        context: &ValidationContext,
+        parent_data: Option<&Value>,
+        messages: &dyn MessagesProvider,
+    ) -> Result<(), ValidationError> {
+        self.check_path(value, path, context, parent_data, messages)
+    }
+
     fn validate_path(
         &self,
         value: &Value,
@@ -1514,8 +1640,22 @@ impl Schema<Value> for ObjectSchema {
         let rule_ctx = RuleContext::new(path, context, parent_data, &composite);
         let inline = self.inline_message.as_deref();
 
+        let sanitized_storage;
         let map = match value {
-            Value::Object(obj) => obj,
+            Value::Object(obj) => {
+                if let Some(coercer) = &self.coercer {
+                    let mut cloned = value.clone();
+                    coercer.sanitize_in_place(&mut cloned);
+                    sanitized_storage = cloned;
+                    if let Value::Object(ref sanitized_obj) = sanitized_storage {
+                        sanitized_obj
+                    } else {
+                        obj
+                    }
+                } else {
+                    obj
+                }
+            }
             Value::Null => {
                 let issue = rule_ctx.create_issue("required", RuleParams::new(), inline);
                 return Err(ValidationError::single(
@@ -1540,7 +1680,7 @@ impl Schema<Value> for ObjectSchema {
         // 1. Check for unexpected unknown fields
         if self.unknown_policy == UnknownFieldPolicy::Strict {
             for key in map.keys() {
-                if !self.fields.contains_key(key) {
+                if !self.fields.iter().any(|(k, _)| k == key) {
                     let field_path = qualify_path(path, key);
                     let mut params = RuleParams::new();
                     params.insert("field", key.clone());
@@ -1584,7 +1724,7 @@ impl Schema<Value> for ObjectSchema {
         // 3. Passthrough extra fields if policy is Passthrough
         if self.unknown_policy == UnknownFieldPolicy::Passthrough {
             for (key, val) in map {
-                if !self.fields.contains_key(key) {
+                if !self.fields.iter().any(|(k, _)| k == key) {
                     result_map.insert(key.clone(), val.clone());
                 }
             }
@@ -1617,8 +1757,22 @@ impl Schema<Value> for ObjectSchema {
             let rule_ctx = RuleContext::new(path, context, parent_data, &composite);
             let inline = self.inline_message.as_deref();
 
+            let sanitized_storage;
             let map = match value {
-                Value::Object(obj) => obj,
+                Value::Object(obj) => {
+                    if let Some(coercer) = &self.coercer {
+                        let mut cloned = value.clone();
+                        coercer.sanitize_in_place(&mut cloned);
+                        sanitized_storage = cloned;
+                        if let Value::Object(ref sanitized_obj) = sanitized_storage {
+                            sanitized_obj
+                        } else {
+                            obj
+                        }
+                    } else {
+                        obj
+                    }
+                }
                 Value::Null => {
                     let issue = rule_ctx.create_issue("required", RuleParams::new(), inline);
                     return Err(ValidationError::single(
@@ -1642,7 +1796,7 @@ impl Schema<Value> for ObjectSchema {
 
             if self.unknown_policy == UnknownFieldPolicy::Strict {
                 for key in map.keys() {
-                    if !self.fields.contains_key(key) {
+                    if !self.fields.iter().any(|(k, _)| k == key) {
                         let field_path = qualify_path(path, key);
                         let mut params = RuleParams::new();
                         params.insert("field", key.clone());
@@ -1686,7 +1840,7 @@ impl Schema<Value> for ObjectSchema {
 
             if self.unknown_policy == UnknownFieldPolicy::Passthrough {
                 for (key, val) in map {
-                    if !self.fields.contains_key(key) {
+                    if !self.fields.iter().any(|(k, _)| k == key) {
                         result_map.insert(key.clone(), val.clone());
                     }
                 }
@@ -1705,12 +1859,10 @@ impl Schema<Value> for ObjectSchema {
     fn to_json_schema_value(&self) -> Value {
         let mut properties = serde_json::Map::new();
         let mut required = Vec::new();
-        for name in &self.field_order {
-            if let Some(field_def) = self.fields.get(name) {
-                properties.insert(name.clone(), field_def.to_json_schema());
-                if !field_def.is_optional() {
-                    required.push(Value::String(name.clone()));
-                }
+        for (name, field_def) in &self.fields {
+            properties.insert(name.clone(), field_def.to_json_schema());
+            if !field_def.is_optional() {
+                required.push(Value::String(name.clone()));
             }
         }
         let mut schema_map = serde_json::Map::new();

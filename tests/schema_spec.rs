@@ -356,6 +356,25 @@ fn test_tuple2_schema() {
 }
 
 #[test]
+fn test_native_rust_tuple_schema_validation() {
+    let schema = (string().min_len(2), integer().positive());
+    let valid = json!(["hello", 42]);
+    let result = schema.validate(&valid).unwrap();
+    assert_eq!(result, ("hello".to_string(), 42));
+
+    let invalid_len = json!(["hello"]);
+    let err = schema.validate(&invalid_len).unwrap_err();
+    assert_eq!(
+        err.first_message(),
+        Some("The value field must contain exactly 2 items.")
+    );
+
+    let invalid_items = json!(["h", -5]);
+    let err = schema.validate(&invalid_items).unwrap_err();
+    assert_eq!(err.len(), 2);
+}
+
+#[test]
 fn test_union2_schema() {
     let s = union2(
         integer().map(|n| format!("number: {n}")),

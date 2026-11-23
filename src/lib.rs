@@ -46,7 +46,10 @@ pub use request::{
 };
 #[cfg(feature = "async")]
 pub use rule::{AsyncCustomRule, SharedAsyncCustomRule};
-pub use rule::{CustomRule, RuleContext, SharedCustomRule};
+pub use rule::{
+    CrossFieldRuleValidator, CustomRule, RuleContext, SharedCrossFieldRuleValidator,
+    SharedCustomRule,
+};
 pub use schema::{
     DateFormat, DateSchema, FileMetadata, FileSchema, Schema, ToJsonSchema, UnknownFieldPolicy,
     array, boolean, date, r#enum, enum_of, file, integer, number, object, record, string, tuple,
@@ -60,11 +63,11 @@ pub mod prelude {
     #[cfg(feature = "async")]
     pub use crate::{AsyncCustomRule, SharedAsyncCustomRule};
     pub use crate::{
-        Coercer, CustomRule, DateFormat, DateSchema, FileMetadata, FileSchema, MessagesProvider,
-        RequestPartKind, RequestParts, RequestSchema, RuleContext, RuleParams, Schema,
-        SimpleMessagesProvider, ToJsonSchema, UnknownFieldPolicy, ValidatedRequest,
-        ValidationContext, ValidationError, ValidationIssue, array, boolean, date, r#enum, enum_of,
-        file, integer, number, object, record, request, request_schema, string, tuple, tuple2,
-        tuple3, tuple4, union, union2, union3, union4,
+        Coercer, CrossFieldRuleValidator, CustomRule, DateFormat, DateSchema, FileMetadata,
+        FileSchema, MessagesProvider, RequestPartKind, RequestParts, RequestSchema, RuleContext,
+        RuleParams, Schema, SharedCrossFieldRuleValidator, SimpleMessagesProvider, ToJsonSchema,
+        UnknownFieldPolicy, ValidatedRequest, ValidationContext, ValidationError, ValidationIssue,
+        array, boolean, date, r#enum, enum_of, file, integer, number, object, record, request,
+        request_schema, string, tuple, tuple2, tuple3, tuple4, union, union2, union3, union4,
     };
 }

@@ -192,6 +192,70 @@ impl ValidatedRequest {
     pub fn decode_cookies<T: DeserializeOwned>(&self) -> Result<T, ValidationError> {
         self.decode_part(RequestPartKind::Cookies)
     }
+
+    /// Converts the validated request parts into a unified `serde_json::Value` object.
+    #[must_use]
+    pub fn to_value(&self) -> Value {
+        let mut map = serde_json::Map::new();
+        if let Some(ref params) = self.params {
+            map.insert("params".to_string(), params.clone());
+        }
+        if let Some(ref query) = self.query {
+            map.insert("query".to_string(), query.clone());
+        }
+        if let Some(ref headers) = self.headers {
+            map.insert("headers".to_string(), headers.clone());
+        }
+        if let Some(ref cookies) = self.cookies {
+            map.insert("cookies".to_string(), cookies.clone());
+        }
+        if let Some(ref body) = self.body {
+            map.insert("body".to_string(), body.clone());
+        }
+        Value::Object(map)
+    }
+}
+
+impl From<&Value> for RequestParts {
+    fn from(val: &Value) -> Self {
+        match val {
+            Value::Object(map) => Self {
+                params: map.get("params").cloned().unwrap_or(Value::Null),
+                query: map.get("query").cloned().unwrap_or(Value::Null),
+                headers: map.get("headers").cloned().unwrap_or(Value::Null),
+                cookies: map.get("cookies").cloned().unwrap_or(Value::Null),
+                body: map.get("body").cloned().unwrap_or(Value::Null),
+            },
+            _ => Self::default(),
+        }
+    }
+}
+
+impl From<Value> for RequestParts {
+    fn from(mut val: Value) -> Self {
+        match val {
+            Value::Object(ref mut map) => Self {
+                params: map.remove("params").unwrap_or(Value::Null),
+                query: map.remove("query").unwrap_or(Value::Null),
+                headers: map.remove("headers").unwrap_or(Value::Null),
+                cookies: map.remove("cookies").unwrap_or(Value::Null),
+                body: map.remove("body").unwrap_or(Value::Null),
+            },
+            _ => Self::default(),
+        }
+    }
+}
+
+impl From<RequestParts> for Value {
+    fn from(parts: RequestParts) -> Self {
+        let mut map = serde_json::Map::new();
+        map.insert("params".to_string(), parts.params);
+        map.insert("query".to_string(), parts.query);
+        map.insert("headers".to_string(), parts.headers);
+        map.insert("cookies".to_string(), parts.cookies);
+        map.insert("body".to_string(), parts.body);
+        Value::Object(map)
+    }
 }
 
 trait ErasedPartSchema: Send + Sync {
@@ -202,6 +266,14 @@ trait ErasedPartSchema: Send + Sync {
         context: &ValidationContext,
         messages: &dyn MessagesProvider,
     ) -> Result<Value, ValidationError>;
+
+    fn check_part(
+        &self,
+        value: &Value,
+        path: &str,
+        context: &ValidationContext,
+        messages: &dyn MessagesProvider,
+    ) -> Result<(), ValidationError>;
 
     #[cfg(feature = "async")]
     fn validate_async_part<'a>(
@@ -230,11 +302,28 @@ where
         context: &ValidationContext,
         messages: &dyn MessagesProvider,
     ) -> Result<Value, ValidationError> {
-        let typed = self
+        let mut typed = self
             .schema
             .validate_path(value, path, context, None, messages)?;
+        let any_mut = &mut typed as &mut dyn std::any::Any;
+        if let Some(v) = any_mut.downcast_mut::<Value>() {
+            return Ok(std::mem::take(v));
+        }
+        if let Some(s) = any_mut.downcast_mut::<String>() {
+            return Ok(Value::String(std::mem::take(s)));
+        }
         serde_json::to_value(&typed)
             .map_err(|err| ValidationError::single(path, "serialization", err.to_string()))
+    }
+
+    fn check_part(
+        &self,
+        value: &Value,
+        path: &str,
+        context: &ValidationContext,
+        messages: &dyn MessagesProvider,
+    ) -> Result<(), ValidationError> {
+        self.schema.check_path(value, path, context, None, messages)
     }
 
     #[cfg(feature = "async")]
@@ -246,10 +335,17 @@ where
         messages: &'a dyn MessagesProvider,
     ) -> BoxFuture<'a, Result<Value, ValidationError>> {
         Box::pin(async move {
-            let typed = self
+            let mut typed = self
                 .schema
                 .validate_async_path(value, path, context, None, messages)
                 .await?;
+            let any_mut = &mut typed as &mut dyn std::any::Any;
+            if let Some(v) = any_mut.downcast_mut::<Value>() {
+                return Ok(std::mem::take(v));
+            }
+            if let Some(s) = any_mut.downcast_mut::<String>() {
+                return Ok(Value::String(std::mem::take(s)));
+            }
             serde_json::to_value(&typed)
                 .map_err(|err| ValidationError::single(path, "serialization", err.to_string()))
         })
@@ -261,13 +357,14 @@ where
 pub struct RequestSchema {
     parts: [Option<Arc<dyn ErasedPartSchema>>; 5],
     bail_on_fail: bool,
+    coercer: Option<crate::coercion::Coercer>,
 }
 
 impl RequestSchema {
     /// Creates a new empty `RequestSchema`.
     #[must_use]
     pub fn new() -> Self {
-        Self::default()
+        <Self as Default>::default()
     }
 
     /// Attaches a schema for validating route parameters.
@@ -347,6 +444,24 @@ impl RequestSchema {
         self
     }
 
+    /// Configures a `Coercer` for in-place pre-sanitization of request components.
+    #[must_use]
+    pub fn coercer(mut self, coercer: crate::coercion::Coercer) -> Self {
+        self.coercer = Some(coercer);
+        self
+    }
+
+    /// Enables or disables in-place pre-sanitization of request components.
+    #[must_use]
+    pub fn sanitize(mut self, enabled: bool) -> Self {
+        if enabled {
+            self.coercer = Some(crate::coercion::Coercer::default());
+        } else {
+            self.coercer = None;
+        }
+        self
+    }
+
     /// Validates all components of an incoming request bundle in a single pass.
     pub fn validate(&self, parts: &RequestParts) -> Result<ValidatedRequest, ValidationError> {
         let context = ValidationContext::new();
@@ -363,9 +478,22 @@ impl RequestSchema {
         let mut errors = ValidationError::new();
         let mut validated = ValidatedRequest::default();
 
+        let mut sanitized_parts;
+        let effective_parts = if let Some(coercer) = &self.coercer {
+            sanitized_parts = parts.clone();
+            coercer.sanitize_in_place(&mut sanitized_parts.params);
+            coercer.sanitize_in_place(&mut sanitized_parts.query);
+            coercer.sanitize_in_place(&mut sanitized_parts.headers);
+            coercer.sanitize_in_place(&mut sanitized_parts.cookies);
+            coercer.sanitize_in_place(&mut sanitized_parts.body);
+            &sanitized_parts
+        } else {
+            parts
+        };
+
         for kind in RequestPartKind::ALL {
             if let Some(schema) = &self.parts[kind as usize] {
-                let input_val = parts.get_part(kind);
+                let input_val = effective_parts.get_part(kind);
                 match schema.validate_part(input_val, kind.name(), context, messages) {
                     Ok(val) => validated.set_part(kind, val),
                     Err(err) => {
@@ -406,9 +534,22 @@ impl RequestSchema {
         let mut errors = ValidationError::new();
         let mut validated = ValidatedRequest::default();
 
+        let mut sanitized_parts;
+        let effective_parts = if let Some(coercer) = &self.coercer {
+            sanitized_parts = parts.clone();
+            coercer.sanitize_in_place(&mut sanitized_parts.params);
+            coercer.sanitize_in_place(&mut sanitized_parts.query);
+            coercer.sanitize_in_place(&mut sanitized_parts.headers);
+            coercer.sanitize_in_place(&mut sanitized_parts.cookies);
+            coercer.sanitize_in_place(&mut sanitized_parts.body);
+            &sanitized_parts
+        } else {
+            parts
+        };
+
         for kind in RequestPartKind::ALL {
             if let Some(schema) = &self.parts[kind as usize] {
-                let input_val = parts.get_part(kind);
+                let input_val = effective_parts.get_part(kind);
                 match schema
                     .validate_async_part(input_val, kind.name(), context, messages)
                     .await
@@ -429,6 +570,181 @@ impl RequestSchema {
         } else {
             Err(errors)
         }
+    }
+
+    /// Checks conformity of all request components without allocating validated output containers.
+    pub fn check_request(&self, parts: &RequestParts) -> Result<(), ValidationError> {
+        let context = ValidationContext::new();
+        let messages = crate::messages::default_messages_provider();
+        self.check_request_with_context(parts, &context, messages)
+    }
+
+    /// Checks conformity of request components with context and message provider.
+    pub fn check_request_with_context(
+        &self,
+        parts: &RequestParts,
+        context: &ValidationContext,
+        messages: &dyn MessagesProvider,
+    ) -> Result<(), ValidationError> {
+        let mut errors = ValidationError::new();
+
+        let mut sanitized_parts;
+        let effective_parts = if let Some(coercer) = &self.coercer {
+            sanitized_parts = parts.clone();
+            coercer.sanitize_in_place(&mut sanitized_parts.params);
+            coercer.sanitize_in_place(&mut sanitized_parts.query);
+            coercer.sanitize_in_place(&mut sanitized_parts.headers);
+            coercer.sanitize_in_place(&mut sanitized_parts.cookies);
+            coercer.sanitize_in_place(&mut sanitized_parts.body);
+            &sanitized_parts
+        } else {
+            parts
+        };
+
+        for kind in RequestPartKind::ALL {
+            if let Some(schema) = &self.parts[kind as usize] {
+                let input_val = effective_parts.get_part(kind);
+                if let Err(err) = schema.check_part(input_val, kind.name(), context, messages) {
+                    errors.merge(err);
+                    if self.bail_on_fail {
+                        return Err(errors);
+                    }
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+}
+
+impl Schema<ValidatedRequest> for RequestSchema {
+    fn check_path(
+        &self,
+        value: &Value,
+        path: &str,
+        context: &ValidationContext,
+        parent_data: Option<&Value>,
+        messages: &dyn MessagesProvider,
+    ) -> Result<(), ValidationError> {
+        let _ = (path, parent_data);
+        let parts = RequestParts::from(value);
+        self.check_request_with_context(&parts, context, messages)
+    }
+
+    fn validate_path(
+        &self,
+        value: &Value,
+        path: &str,
+        context: &ValidationContext,
+        parent_data: Option<&Value>,
+        messages: &dyn MessagesProvider,
+    ) -> Result<ValidatedRequest, ValidationError> {
+        let _ = parent_data;
+        let parts = RequestParts::from(value);
+        let mut validated = ValidatedRequest::default();
+        let mut errors = ValidationError::new();
+
+        let mut sanitized_parts;
+        let effective_parts = if let Some(coercer) = &self.coercer {
+            sanitized_parts = parts.clone();
+            coercer.sanitize_in_place(&mut sanitized_parts.params);
+            coercer.sanitize_in_place(&mut sanitized_parts.query);
+            coercer.sanitize_in_place(&mut sanitized_parts.headers);
+            coercer.sanitize_in_place(&mut sanitized_parts.cookies);
+            coercer.sanitize_in_place(&mut sanitized_parts.body);
+            &sanitized_parts
+        } else {
+            &parts
+        };
+
+        for kind in RequestPartKind::ALL {
+            if let Some(schema) = &self.parts[kind as usize] {
+                let input_val = effective_parts.get_part(kind);
+                let part_path = if path.is_empty() {
+                    kind.name().to_string()
+                } else {
+                    format!("{}.{}", path, kind.name())
+                };
+                match schema.validate_part(input_val, &part_path, context, messages) {
+                    Ok(val) => validated.set_part(kind, val),
+                    Err(err) => {
+                        errors.merge(err);
+                        if self.bail_on_fail {
+                            return Err(errors);
+                        }
+                    }
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(validated)
+        } else {
+            Err(errors)
+        }
+    }
+
+    #[cfg(feature = "async")]
+    fn validate_async_path<'a>(
+        &'a self,
+        value: &'a Value,
+        path: &'a str,
+        context: &'a ValidationContext,
+        parent_data: Option<&'a Value>,
+        messages: &'a dyn MessagesProvider,
+    ) -> BoxFuture<'a, Result<ValidatedRequest, ValidationError>> {
+        Box::pin(async move {
+            let _ = parent_data;
+            let parts = RequestParts::from(value);
+            let mut validated = ValidatedRequest::default();
+            let mut errors = ValidationError::new();
+
+            let mut sanitized_parts;
+            let effective_parts = if let Some(coercer) = &self.coercer {
+                sanitized_parts = parts.clone();
+                coercer.sanitize_in_place(&mut sanitized_parts.params);
+                coercer.sanitize_in_place(&mut sanitized_parts.query);
+                coercer.sanitize_in_place(&mut sanitized_parts.headers);
+                coercer.sanitize_in_place(&mut sanitized_parts.cookies);
+                coercer.sanitize_in_place(&mut sanitized_parts.body);
+                &sanitized_parts
+            } else {
+                &parts
+            };
+
+            for kind in RequestPartKind::ALL {
+                if let Some(schema) = &self.parts[kind as usize] {
+                    let input_val = effective_parts.get_part(kind);
+                    let part_path = if path.is_empty() {
+                        kind.name().to_string()
+                    } else {
+                        format!("{}.{}", path, kind.name())
+                    };
+                    match schema
+                        .validate_async_part(input_val, &part_path, context, messages)
+                        .await
+                    {
+                        Ok(val) => validated.set_part(kind, val),
+                        Err(err) => {
+                            errors.merge(err);
+                            if self.bail_on_fail {
+                                return Err(errors);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if errors.is_empty() {
+                Ok(validated)
+            } else {
+                Err(errors)
+            }
+        })
     }
 }
 

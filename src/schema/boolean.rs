@@ -54,6 +54,7 @@ impl BooleanSchema {
     }
 
     /// Checks that a boolean conforms to all rules without requiring `Value` wrappers.
+    #[inline]
     pub fn check_bool(&self, input: bool) -> Result<(), ValidationError> {
         if self.must_be_accepted && !input {
             let context = ValidationContext::new();
@@ -78,6 +79,7 @@ impl BooleanSchema {
     }
 
     /// Validates a boolean, returning it on success.
+    #[inline]
     pub fn validate_bool(&self, input: bool) -> Result<bool, ValidationError> {
         self.check_bool(input).map(|_| input)
     }

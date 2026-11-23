@@ -304,7 +304,7 @@ where
     let iterations = (target_ops / data.len()).max(1);
 
     // Warmup to stabilize CPU frequency scaling and cache lines
-    let warmup_batches = (5_000 / data.len()).max(10);
+    let warmup_batches = (10_000 / data.len()).max(20);
     for _ in 0..warmup_batches {
         for item in data {
             op(item);
@@ -335,6 +335,14 @@ where
 }
 
 fn main() {
+    // Warm up CPU governor and turbo frequencies across the benchmark core
+    let warmup_start = Instant::now();
+    let mut sink = 0u64;
+    while warmup_start.elapsed().as_millis() < 250 {
+        sink = black_box(sink.wrapping_add(1));
+    }
+    black_box(sink);
+
     let corpus_content = fs::read_to_string("benches/data/corpus.json")
         .expect("Failed to read corpus.json. Please generate it first.");
     let corpus: Corpus =

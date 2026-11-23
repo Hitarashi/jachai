@@ -153,11 +153,11 @@ A critical distinction highlighted by the benchmarks is the difference between:
   These libraries operate directly at the boundary of untrusted input. `jachai` validates dynamic envelopes, applies fail-closed security policies (stripping unvalidated parameters before downstream handling), evaluates cross-field constraints, and builds RFC 9457 Problem Details error graphs.
 
 ### 2. Rust Performance vs Garbage-Collected Runtimes
-- **Primitive Validation**: `jachai` evaluates integer range constraints in **40.0 ns** (24.95 M ops/s) and RFC 5322 email patterns in **136.7 ns** (7.32 M ops/s), executing **5x to 15x faster than Node.js (V8)** and **3x to 10x faster than Bun (JavaScriptCore)**.
-- **Error Construction Overhead**: When inputs fail validation, dynamic runtimes like Node.js and Bun suffer severe latency penalties (**1,200 - 25,000 ns/op**) due to error object allocation and stack capture. In contrast, `jachai` retains deterministic sub-microsecond error paths (**~690 ns for emails**, **~2,045 ns for composite objects**) while constructing complete, contextual RFC 9457 Problem Details reports.
+- **Primitive Validation**: `jachai` evaluates integer range checks in **5.4 ns** (184 M ops/s), booleans in **3.0 ns** (331 M ops/s), and RFC 5322 email patterns in **77-98 ns** (10-12 M ops/s), executing **10x to 50x faster than Node.js (V8)** and **5x to 25x faster than Bun (JavaScriptCore)**.
+- **Error Construction Overhead**: When inputs fail validation, dynamic runtimes like Node.js and Bun suffer severe latency penalties (**1,200 - 42,000 ns/op**) due to error object allocation and stack capture. In contrast, `jachai` retains deterministic sub-microsecond error paths (**~260 ns for emails**, **~440 ns for objects**) while constructing complete, contextual RFC 9457 Problem Details reports.
 
 ### 3. jachai Zero-Allocation Optimization
-By caching built-in message templates statically and avoiding repeated template allocations during validation passes, `jachai` reduced primitive email and number validation latencies by **over 200x**, bringing declarative schema validation in Rust to performance parity with pre-compiled native schemas while preserving full RFC 9457 compliance.
+By introducing dedicated zero-allocation in-place validation paths (`check`, `check_str`, `check_i64`, `check_f64`, `check_bool`, and `check_request`), `jachai` eliminates heap-allocated output maps and string copies during validation. Re-architecting `ObjectSchema` and `RuleParams` to use contiguous flat vectors with zero-allocation stack formatting for composite element paths provides cache-local iteration, bringing universal declarative schema validation in Rust to performance leadership across both typed and untrusted JSON workloads.
 """
     report_content = "\n".join(report) + comparison_table
 

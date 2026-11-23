@@ -166,6 +166,49 @@ where
     }
 }
 
+#[inline]
+fn qualify_index_path<'a>(
+    base: &'a str,
+    index: usize,
+    buf: &'a mut [u8; 64],
+) -> std::borrow::Cow<'a, str> {
+    let base_bytes = base.as_bytes();
+    let mut idx = index;
+    let mut digit_buf = [0u8; 20];
+    let mut digit_len = 0;
+    if idx == 0 {
+        digit_buf[0] = b'0';
+        digit_len = 1;
+    } else {
+        while idx > 0 {
+            digit_buf[digit_len] = b'0' + (idx % 10) as u8;
+            digit_len += 1;
+            idx /= 10;
+        }
+    }
+    let total_len = base_bytes.len() + 2 + digit_len;
+    if total_len <= 64 {
+        buf[..base_bytes.len()].copy_from_slice(base_bytes);
+        let mut pos = base_bytes.len();
+        buf[pos] = b'[';
+        pos += 1;
+        for i in (0..digit_len).rev() {
+            buf[pos] = digit_buf[i];
+            pos += 1;
+        }
+        buf[pos] = b']';
+        pos += 1;
+        let s = unsafe { std::str::from_utf8_unchecked(&buf[..pos]) };
+        std::borrow::Cow::Borrowed(s)
+    } else {
+        std::borrow::Cow::Owned(if base.is_empty() {
+            format!("[{index}]")
+        } else {
+            format!("{base}[{index}]")
+        })
+    }
+}
+
 impl<S, T> Schema<Vec<T>> for ArraySchema<S, T>
 where
     S: Schema<T>,
@@ -248,14 +291,35 @@ where
         }
 
         if self.distinct {
-            let mut seen = HashSet::new();
-            for item in items {
-                if !seen.insert(item) {
+            if items.len() <= 16 {
+                let mut has_duplicate = false;
+                for i in 0..items.len() {
+                    for j in (i + 1)..items.len() {
+                        if items[i] == items[j] {
+                            has_duplicate = true;
+                            break;
+                        }
+                    }
+                    if has_duplicate {
+                        break;
+                    }
+                }
+                if has_duplicate {
                     errors.push(rule_ctx.create_issue("distinct", RuleParams::new(), inline));
                     if self.bail_on_fail {
                         return Err(errors);
                     }
-                    break;
+                }
+            } else {
+                let mut seen = HashSet::with_capacity(items.len());
+                for item in items {
+                    if !seen.insert(item) {
+                        errors.push(rule_ctx.create_issue("distinct", RuleParams::new(), inline));
+                        if self.bail_on_fail {
+                            return Err(errors);
+                        }
+                        break;
+                    }
                 }
             }
         }
@@ -317,12 +381,9 @@ where
         }
 
         let mut validated_items = Vec::with_capacity(items.len());
+        let mut path_buf = [0u8; 64];
         for (index, item) in items.iter().enumerate() {
-            let item_path = if path.is_empty() {
-                format!("[{index}]")
-            } else {
-                format!("{path}[{index}]")
-            };
+            let item_path = qualify_index_path(path, index, &mut path_buf);
 
             match self.element_schema.validate_path(
                 item,
@@ -425,14 +486,35 @@ where
         }
 
         if self.distinct {
-            let mut seen = HashSet::new();
-            for item in items {
-                if !seen.insert(item) {
+            if items.len() <= 16 {
+                let mut has_duplicate = false;
+                for i in 0..items.len() {
+                    for j in (i + 1)..items.len() {
+                        if items[i] == items[j] {
+                            has_duplicate = true;
+                            break;
+                        }
+                    }
+                    if has_duplicate {
+                        break;
+                    }
+                }
+                if has_duplicate {
                     errors.push(rule_ctx.create_issue("distinct", RuleParams::new(), inline));
                     if self.bail_on_fail {
                         return Err(errors);
                     }
-                    break;
+                }
+            } else {
+                let mut seen = HashSet::with_capacity(items.len());
+                for item in items {
+                    if !seen.insert(item) {
+                        errors.push(rule_ctx.create_issue("distinct", RuleParams::new(), inline));
+                        if self.bail_on_fail {
+                            return Err(errors);
+                        }
+                        break;
+                    }
                 }
             }
         }
@@ -493,12 +575,9 @@ where
             }
         }
 
+        let mut path_buf = [0u8; 64];
         for (index, item) in items.iter().enumerate() {
-            let item_path = if path.is_empty() {
-                format!("[{index}]")
-            } else {
-                format!("{path}[{index}]")
-            };
+            let item_path = qualify_index_path(path, index, &mut path_buf);
 
             if let Err(element_errors) =
                 self.element_schema

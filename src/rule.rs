@@ -148,3 +148,23 @@ where
 #[cfg(feature = "async")]
 /// Shared thread-safe reference to an asynchronous custom rule.
 pub type SharedAsyncCustomRule<T> = Arc<dyn AsyncCustomRule<T>>;
+
+/// Contract for multi-field cross-field validation rules evaluated on object schemas.
+pub trait CrossFieldRuleValidator: Send + Sync {
+    /// Evaluates the multi-field rule against an object payload map.
+    fn evaluate(
+        &self,
+        map: &serde_json::Map<String, serde_json::Value>,
+        path: &str,
+        ctx: &RuleContext<'_>,
+    ) -> Option<ValidationIssue>;
+
+    /// Returns `true` if all fields referenced by this rule are contained within `keys`.
+    fn references_only(&self, keys: &[&str]) -> bool;
+
+    /// Returns `true` if any field referenced by this rule is contained within `keys`.
+    fn references_any(&self, keys: &[&str]) -> bool;
+}
+
+/// Shared thread-safe reference to a cross-field rule validator.
+pub type SharedCrossFieldRuleValidator = Arc<dyn CrossFieldRuleValidator>;

@@ -131,4 +131,29 @@ where
             }
         }
     }
+
+    fn check_path(
+        &self,
+        value: &Value,
+        path: &str,
+        context: &ValidationContext,
+        parent_data: Option<&Value>,
+        messages: &dyn MessagesProvider,
+    ) -> Result<(), ValidationError> {
+        let str_val = match value {
+            Value::String(s) => s.as_str(),
+            _ => {
+                return self
+                    .validate_path(value, path, context, parent_data, messages)
+                    .map(|_| ());
+            }
+        };
+
+        if T::from_str(str_val).is_ok() {
+            Ok(())
+        } else {
+            self.validate_path(value, path, context, parent_data, messages)
+                .map(|_| ())
+        }
+    }
 }

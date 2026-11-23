@@ -12,785 +12,269 @@ use crate::{
     schema::Schema,
 };
 
-/// Tuple schema validating a 2-element heterogeneous sequence `(T1, T2)`.
-#[derive(Clone)]
-pub struct Tuple2Schema<S1, S2, T1, T2> {
-    first: S1,
-    second: S2,
-    bail_on_fail: bool,
-    inline_message: Option<String>,
-    phantom: std::marker::PhantomData<(T1, T2)>,
-}
-
-impl<S1, S2, T1, T2> Tuple2Schema<S1, S2, T1, T2>
-where
-    S1: Schema<T1>,
-    S2: Schema<T2>,
-{
-    /// Creates a new `Tuple2Schema`.
-    #[must_use]
-    pub fn new(first: S1, second: S2) -> Self {
-        Self {
-            first,
-            second,
-            bail_on_fail: false,
-            inline_message: None,
-            phantom: std::marker::PhantomData,
+macro_rules! define_tuple_schema {
+    (
+        $struct_name:ident,
+        $builder_name:ident,
+        $len:expr,
+        $len_str:expr,
+        $( ($idx:tt, $field:ident, $schema_ty:ident, $val_ty:ident) ),+
+    ) => {
+        /// Tuple schema validating a fixed-length heterogeneous sequence.
+        #[derive(Clone)]
+        pub struct $struct_name<$( $schema_ty, )+ $( $val_ty, )+> {
+            $( $field: $schema_ty, )+
+            bail_on_fail: bool,
+            inline_message: Option<String>,
+            phantom: std::marker::PhantomData<($( $val_ty, )+)>,
         }
-    }
 
-    /// Configures short-circuiting on failure.
-    #[must_use]
-    pub fn bail(mut self, enabled: bool) -> Self {
-        self.bail_on_fail = enabled;
-        self
-    }
-
-    /// Sets an inline custom message override.
-    #[must_use]
-    pub fn with_message(mut self, message: impl Into<String>) -> Self {
-        self.inline_message = Some(message.into());
-        self
-    }
-}
-
-impl<S1, S2, T1, T2> Schema<(T1, T2)> for Tuple2Schema<S1, S2, T1, T2>
-where
-    S1: Schema<T1>,
-    S2: Schema<T2>,
-    T1: Send + Sync + 'static,
-    T2: Send + Sync + 'static,
-{
-    fn validate_path(
-        &self,
-        value: &Value,
-        path: &str,
-        context: &ValidationContext,
-        parent_data: Option<&Value>,
-        messages: &dyn MessagesProvider,
-    ) -> Result<(T1, T2), ValidationError> {
-        let rule_ctx = RuleContext::new(path, context, parent_data, messages);
-        let inline = self.inline_message.as_deref();
-
-        let items = match value {
-            Value::Array(arr) if arr.len() == 2 => arr,
-            _ => {
-                let mut params = RuleParams::new();
-                params.insert("length", "2");
-                let issue = rule_ctx.create_issue("exact_items", params, inline);
-                return Err(ValidationError::single(
-                    issue.field,
-                    issue.rule,
-                    issue.message,
-                ));
-            }
-        };
-
-        let mut errors = ValidationError::new();
-
-        let path1 = if path.is_empty() {
-            "[0]".to_string()
-        } else {
-            format!("{path}[0]")
-        };
-        let path2 = if path.is_empty() {
-            "[1]".to_string()
-        } else {
-            format!("{path}[1]")
-        };
-
-        let res1 = self
-            .first
-            .validate_path(&items[0], &path1, context, Some(value), messages);
-        let res2 = self
-            .second
-            .validate_path(&items[1], &path2, context, Some(value), messages);
-
-        let valid1 = match res1 {
-            Ok(val) => Some(val),
-            Err(err) => {
-                errors.merge(err);
-                if self.bail_on_fail {
-                    return Err(errors);
+        impl<$( $schema_ty, )+ $( $val_ty, )+> $struct_name<$( $schema_ty, )+ $( $val_ty, )+>
+        where
+            $( $schema_ty: Schema<$val_ty>, )+
+        {
+            /// Creates a new tuple schema.
+            #[must_use]
+            pub fn new($( $field: $schema_ty, )+) -> Self {
+                Self {
+                    $( $field, )+
+                    bail_on_fail: false,
+                    inline_message: None,
+                    phantom: std::marker::PhantomData,
                 }
-                None
             }
-        };
 
-        let valid2 = match res2 {
-            Ok(val) => Some(val),
-            Err(err) => {
-                errors.merge(err);
-                if self.bail_on_fail {
-                    return Err(errors);
-                }
-                None
+            /// Configures short-circuiting on failure.
+            #[must_use]
+            pub fn bail(mut self, enabled: bool) -> Self {
+                self.bail_on_fail = enabled;
+                self
             }
-        };
 
-        if let (Some(v1), Some(v2)) = (valid1, valid2) {
-            Ok((v1, v2))
-        } else {
-            Err(errors)
+            /// Sets an inline custom message override.
+            #[must_use]
+            pub fn with_message(mut self, message: impl Into<String>) -> Self {
+                self.inline_message = Some(message.into());
+                self
+            }
         }
-    }
 
-    #[cfg(feature = "async")]
-    fn validate_async_path<'a>(
-        &'a self,
-        value: &'a Value,
-        path: &'a str,
-        context: &'a ValidationContext,
-        parent_data: Option<&'a Value>,
-        messages: &'a dyn MessagesProvider,
-    ) -> BoxFuture<'a, Result<(T1, T2), ValidationError>> {
-        Box::pin(async move {
-            let rule_ctx = RuleContext::new(path, context, parent_data, messages);
-            let inline = self.inline_message.as_deref();
+        impl<$( $schema_ty, )+ $( $val_ty, )+> Schema<($( $val_ty, )+)>
+            for $struct_name<$( $schema_ty, )+ $( $val_ty, )+>
+        where
+            $( $schema_ty: Schema<$val_ty>, )+
+            $( $val_ty: Send + Sync + 'static, )+
+        {
+            fn validate_path(
+                &self,
+                value: &Value,
+                path: &str,
+                context: &ValidationContext,
+                parent_data: Option<&Value>,
+                messages: &dyn MessagesProvider,
+            ) -> Result<($( $val_ty, )+), ValidationError> {
+                let rule_ctx = RuleContext::new(path, context, parent_data, messages);
+                let inline = self.inline_message.as_deref();
 
-            let items = match value {
-                Value::Array(arr) if arr.len() == 2 => arr,
-                _ => {
-                    let mut params = RuleParams::new();
-                    params.insert("length", "2");
-                    let issue = rule_ctx.create_issue("exact_items", params, inline);
-                    return Err(ValidationError::single(
-                        issue.field,
-                        issue.rule,
-                        issue.message,
-                    ));
-                }
-            };
-
-            let mut errors = ValidationError::new();
-
-            let path1 = if path.is_empty() {
-                "[0]".to_string()
-            } else {
-                format!("{path}[0]")
-            };
-            let path2 = if path.is_empty() {
-                "[1]".to_string()
-            } else {
-                format!("{path}[1]")
-            };
-
-            let res1 = self
-                .first
-                .validate_async_path(&items[0], &path1, context, Some(value), messages)
-                .await;
-            let res2 = self
-                .second
-                .validate_async_path(&items[1], &path2, context, Some(value), messages)
-                .await;
-
-            let valid1 = match res1 {
-                Ok(val) => Some(val),
-                Err(err) => {
-                    errors.merge(err);
-                    if self.bail_on_fail {
-                        return Err(errors);
+                let items = match value {
+                    Value::Array(arr) if arr.len() == $len => arr,
+                    _ => {
+                        let mut params = RuleParams::new();
+                        params.insert("length", $len_str);
+                        let issue = rule_ctx.create_issue("exact_items", params, inline);
+                        return Err(ValidationError::single(
+                            issue.field,
+                            issue.rule,
+                            issue.message,
+                        ));
                     }
-                    None
-                }
-            };
+                };
 
-            let valid2 = match res2 {
-                Ok(val) => Some(val),
-                Err(err) => {
-                    errors.merge(err);
-                    if self.bail_on_fail {
-                        return Err(errors);
-                    }
-                    None
-                }
-            };
+                let mut errors = ValidationError::new();
 
-            if let (Some(v1), Some(v2)) = (valid1, valid2) {
-                Ok((v1, v2))
-            } else {
-                Err(errors)
+                $(
+                    let sub_path = if path.is_empty() {
+                        std::borrow::Cow::Borrowed(concat!("[", stringify!($idx), "]"))
+                    } else {
+                        std::borrow::Cow::Owned(format!("{}[{}]", path, $idx))
+                    };
+                    let res = self.$field.validate_path(
+                        &items[$idx],
+                        &sub_path,
+                        context,
+                        Some(value),
+                        messages,
+                    );
+                    let $field = match res {
+                        Ok(val) => Some(val),
+                        Err(err) => {
+                            errors.merge(err);
+                            if self.bail_on_fail {
+                                return Err(errors);
+                            }
+                            None
+                        }
+                    };
+                )+
+
+                if let ($( Some($field), )+) = ($( $field, )+) {
+                    Ok(($( $field, )+))
+                } else {
+                    Err(errors)
+                }
             }
-        })
-    }
-}
 
-/// Tuple schema validating a 3-element heterogeneous sequence `(T1, T2, T3)`.
-#[derive(Clone)]
-pub struct Tuple3Schema<S1, S2, S3, T1, T2, T3> {
-    first: S1,
-    second: S2,
-    third: S3,
-    bail_on_fail: bool,
-    inline_message: Option<String>,
-    phantom: std::marker::PhantomData<(T1, T2, T3)>,
-}
+            fn check_path(
+                &self,
+                value: &Value,
+                path: &str,
+                context: &ValidationContext,
+                parent_data: Option<&Value>,
+                messages: &dyn MessagesProvider,
+            ) -> Result<(), ValidationError> {
+                let items = match value {
+                    Value::Array(arr) if arr.len() == $len => arr,
+                    _ => {
+                        return self.validate_path(value, path, context, parent_data, messages).map(|_| ());
+                    }
+                };
 
-impl<S1, S2, S3, T1, T2, T3> Tuple3Schema<S1, S2, S3, T1, T2, T3>
-where
-    S1: Schema<T1>,
-    S2: Schema<T2>,
-    S3: Schema<T3>,
-{
-    /// Creates a new `Tuple3Schema`.
-    #[must_use]
-    pub fn new(first: S1, second: S2, third: S3) -> Self {
-        Self {
-            first,
-            second,
-            third,
-            bail_on_fail: false,
-            inline_message: None,
-            phantom: std::marker::PhantomData,
+                let mut errors = ValidationError::new();
+                $(
+                    let sub_path = if path.is_empty() {
+                        std::borrow::Cow::Borrowed(concat!("[", stringify!($idx), "]"))
+                    } else {
+                        std::borrow::Cow::Owned(format!("{}[{}]", path, $idx))
+                    };
+                    if let Err(err) = self.$field.check_path(
+                        &items[$idx],
+                        &sub_path,
+                        context,
+                        Some(value),
+                        messages,
+                    ) {
+                        errors.merge(err);
+                        if self.bail_on_fail {
+                            return Err(errors);
+                        }
+                    }
+                )+
+
+                if errors.is_empty() {
+                    Ok(())
+                } else {
+                    Err(errors)
+                }
+            }
+
+            #[cfg(feature = "async")]
+            fn validate_async_path<'a>(
+                &'a self,
+                value: &'a Value,
+                path: &'a str,
+                context: &'a ValidationContext,
+                parent_data: Option<&'a Value>,
+                messages: &'a dyn MessagesProvider,
+            ) -> BoxFuture<'a, Result<($( $val_ty, )+), ValidationError>> {
+                Box::pin(async move {
+                    let rule_ctx = RuleContext::new(path, context, parent_data, messages);
+                    let inline = self.inline_message.as_deref();
+
+                    let items = match value {
+                        Value::Array(arr) if arr.len() == $len => arr,
+                        _ => {
+                            let mut params = RuleParams::new();
+                            params.insert("length", $len_str);
+                            let issue = rule_ctx.create_issue("exact_items", params, inline);
+                            return Err(ValidationError::single(
+                                issue.field,
+                                issue.rule,
+                                issue.message,
+                            ));
+                        }
+                    };
+
+                    let mut errors = ValidationError::new();
+
+                    $(
+                        let sub_path = if path.is_empty() {
+                            format!("[{}]", $idx)
+                        } else {
+                            format!("{}[{}]", path, $idx)
+                        };
+                        let res = self
+                            .$field
+                            .validate_async_path(
+                                &items[$idx],
+                                &sub_path,
+                                context,
+                                Some(value),
+                                messages,
+                            )
+                            .await;
+                        let $field = match res {
+                            Ok(val) => Some(val),
+                            Err(err) => {
+                                errors.merge(err);
+                                if self.bail_on_fail {
+                                    return Err(errors);
+                                }
+                                None
+                            }
+                        };
+                    )+
+
+                    if let ($( Some($field), )+) = ($( $field, )+) {
+                        Ok(($( $field, )+))
+                    } else {
+                        Err(errors)
+                    }
+                })
+            }
         }
-    }
 
-    /// Configures short-circuiting on failure.
-    #[must_use]
-    pub fn bail(mut self, enabled: bool) -> Self {
-        self.bail_on_fail = enabled;
-        self
-    }
-
-    /// Sets an inline custom message override.
-    #[must_use]
-    pub fn with_message(mut self, message: impl Into<String>) -> Self {
-        self.inline_message = Some(message.into());
-        self
-    }
-}
-
-impl<S1, S2, S3, T1, T2, T3> Schema<(T1, T2, T3)> for Tuple3Schema<S1, S2, S3, T1, T2, T3>
-where
-    S1: Schema<T1>,
-    S2: Schema<T2>,
-    S3: Schema<T3>,
-    T1: Send + Sync + 'static,
-    T2: Send + Sync + 'static,
-    T3: Send + Sync + 'static,
-{
-    fn validate_path(
-        &self,
-        value: &Value,
-        path: &str,
-        context: &ValidationContext,
-        parent_data: Option<&Value>,
-        messages: &dyn MessagesProvider,
-    ) -> Result<(T1, T2, T3), ValidationError> {
-        let rule_ctx = RuleContext::new(path, context, parent_data, messages);
-        let inline = self.inline_message.as_deref();
-
-        let items = match value {
-            Value::Array(arr) if arr.len() == 3 => arr,
-            _ => {
-                let mut params = RuleParams::new();
-                params.insert("length", "3");
-                let issue = rule_ctx.create_issue("exact_items", params, inline);
-                return Err(ValidationError::single(
-                    issue.field,
-                    issue.rule,
-                    issue.message,
-                ));
-            }
-        };
-
-        let mut errors = ValidationError::new();
-
-        let path1 = if path.is_empty() {
-            "[0]".to_string()
-        } else {
-            format!("{path}[0]")
-        };
-        let path2 = if path.is_empty() {
-            "[1]".to_string()
-        } else {
-            format!("{path}[1]")
-        };
-        let path3 = if path.is_empty() {
-            "[2]".to_string()
-        } else {
-            format!("{path}[2]")
-        };
-
-        let res1 = self
-            .first
-            .validate_path(&items[0], &path1, context, Some(value), messages);
-        let valid1 = match res1 {
-            Ok(val) => Some(val),
-            Err(err) => {
-                errors.merge(err);
-                if self.bail_on_fail {
-                    return Err(errors);
-                }
-                None
-            }
-        };
-
-        let res2 = self
-            .second
-            .validate_path(&items[1], &path2, context, Some(value), messages);
-        let valid2 = match res2 {
-            Ok(val) => Some(val),
-            Err(err) => {
-                errors.merge(err);
-                if self.bail_on_fail {
-                    return Err(errors);
-                }
-                None
-            }
-        };
-
-        let res3 = self
-            .third
-            .validate_path(&items[2], &path3, context, Some(value), messages);
-        let valid3 = match res3 {
-            Ok(val) => Some(val),
-            Err(err) => {
-                errors.merge(err);
-                if self.bail_on_fail {
-                    return Err(errors);
-                }
-                None
-            }
-        };
-
-        if let (Some(v1), Some(v2), Some(v3)) = (valid1, valid2, valid3) {
-            Ok((v1, v2, v3))
-        } else {
-            Err(errors)
+        /// Creates a tuple schema builder.
+        #[must_use]
+        pub fn $builder_name<$( $schema_ty, )+ $( $val_ty, )+>(
+            $( $field: $schema_ty, )+
+        ) -> $struct_name<$( $schema_ty, )+ $( $val_ty, )+>
+        where
+            $( $schema_ty: Schema<$val_ty>, )+
+        {
+            $struct_name::new($( $field, )+)
         }
-    }
-
-    #[cfg(feature = "async")]
-    fn validate_async_path<'a>(
-        &'a self,
-        value: &'a Value,
-        path: &'a str,
-        context: &'a ValidationContext,
-        parent_data: Option<&'a Value>,
-        messages: &'a dyn MessagesProvider,
-    ) -> BoxFuture<'a, Result<(T1, T2, T3), ValidationError>> {
-        Box::pin(async move {
-            let rule_ctx = RuleContext::new(path, context, parent_data, messages);
-            let inline = self.inline_message.as_deref();
-
-            let items = match value {
-                Value::Array(arr) if arr.len() == 3 => arr,
-                _ => {
-                    let mut params = RuleParams::new();
-                    params.insert("length", "3");
-                    let issue = rule_ctx.create_issue("exact_items", params, inline);
-                    return Err(ValidationError::single(
-                        issue.field,
-                        issue.rule,
-                        issue.message,
-                    ));
-                }
-            };
-
-            let mut errors = ValidationError::new();
-
-            let path1 = if path.is_empty() {
-                "[0]".to_string()
-            } else {
-                format!("{path}[0]")
-            };
-            let path2 = if path.is_empty() {
-                "[1]".to_string()
-            } else {
-                format!("{path}[1]")
-            };
-            let path3 = if path.is_empty() {
-                "[2]".to_string()
-            } else {
-                format!("{path}[2]")
-            };
-
-            let res1 = self
-                .first
-                .validate_async_path(&items[0], &path1, context, Some(value), messages)
-                .await;
-            let valid1 = match res1 {
-                Ok(val) => Some(val),
-                Err(err) => {
-                    errors.merge(err);
-                    if self.bail_on_fail {
-                        return Err(errors);
-                    }
-                    None
-                }
-            };
-
-            let res2 = self
-                .second
-                .validate_async_path(&items[1], &path2, context, Some(value), messages)
-                .await;
-            let valid2 = match res2 {
-                Ok(val) => Some(val),
-                Err(err) => {
-                    errors.merge(err);
-                    if self.bail_on_fail {
-                        return Err(errors);
-                    }
-                    None
-                }
-            };
-
-            let res3 = self
-                .third
-                .validate_async_path(&items[2], &path3, context, Some(value), messages)
-                .await;
-            let valid3 = match res3 {
-                Ok(val) => Some(val),
-                Err(err) => {
-                    errors.merge(err);
-                    if self.bail_on_fail {
-                        return Err(errors);
-                    }
-                    None
-                }
-            };
-
-            if let (Some(v1), Some(v2), Some(v3)) = (valid1, valid2, valid3) {
-                Ok((v1, v2, v3))
-            } else {
-                Err(errors)
-            }
-        })
-    }
+    };
 }
 
-/// Tuple schema validating a 4-element heterogeneous sequence `(T1, T2, T3, T4)`.
-#[derive(Clone)]
-pub struct Tuple4Schema<S1, S2, S3, S4, T1, T2, T3, T4> {
-    first: S1,
-    second: S2,
-    third: S3,
-    fourth: S4,
-    bail_on_fail: bool,
-    inline_message: Option<String>,
-    phantom: std::marker::PhantomData<(T1, T2, T3, T4)>,
-}
+define_tuple_schema!(
+    Tuple2Schema,
+    tuple2,
+    2,
+    "2",
+    (0, first, S1, T1),
+    (1, second, S2, T2)
+);
 
-impl<S1, S2, S3, S4, T1, T2, T3, T4> Tuple4Schema<S1, S2, S3, S4, T1, T2, T3, T4>
-where
-    S1: Schema<T1>,
-    S2: Schema<T2>,
-    S3: Schema<T3>,
-    S4: Schema<T4>,
-{
-    /// Creates a new `Tuple4Schema`.
-    #[must_use]
-    pub fn new(first: S1, second: S2, third: S3, fourth: S4) -> Self {
-        Self {
-            first,
-            second,
-            third,
-            fourth,
-            bail_on_fail: false,
-            inline_message: None,
-            phantom: std::marker::PhantomData,
-        }
-    }
+define_tuple_schema!(
+    Tuple3Schema,
+    tuple3,
+    3,
+    "3",
+    (0, first, S1, T1),
+    (1, second, S2, T2),
+    (2, third, S3, T3)
+);
 
-    /// Configures short-circuiting on failure.
-    #[must_use]
-    pub fn bail(mut self, enabled: bool) -> Self {
-        self.bail_on_fail = enabled;
-        self
-    }
-
-    /// Sets an inline custom message override.
-    #[must_use]
-    pub fn with_message(mut self, message: impl Into<String>) -> Self {
-        self.inline_message = Some(message.into());
-        self
-    }
-}
-
-impl<S1, S2, S3, S4, T1, T2, T3, T4> Schema<(T1, T2, T3, T4)>
-    for Tuple4Schema<S1, S2, S3, S4, T1, T2, T3, T4>
-where
-    S1: Schema<T1>,
-    S2: Schema<T2>,
-    S3: Schema<T3>,
-    S4: Schema<T4>,
-    T1: Send + Sync + 'static,
-    T2: Send + Sync + 'static,
-    T3: Send + Sync + 'static,
-    T4: Send + Sync + 'static,
-{
-    fn validate_path(
-        &self,
-        value: &Value,
-        path: &str,
-        context: &ValidationContext,
-        parent_data: Option<&Value>,
-        messages: &dyn MessagesProvider,
-    ) -> Result<(T1, T2, T3, T4), ValidationError> {
-        let rule_ctx = RuleContext::new(path, context, parent_data, messages);
-        let inline = self.inline_message.as_deref();
-
-        let items = match value {
-            Value::Array(arr) if arr.len() == 4 => arr,
-            _ => {
-                let mut params = RuleParams::new();
-                params.insert("length", "4");
-                let issue = rule_ctx.create_issue("exact_items", params, inline);
-                return Err(ValidationError::single(
-                    issue.field,
-                    issue.rule,
-                    issue.message,
-                ));
-            }
-        };
-
-        let mut errors = ValidationError::new();
-
-        let path1 = if path.is_empty() {
-            "[0]".to_string()
-        } else {
-            format!("{path}[0]")
-        };
-        let path2 = if path.is_empty() {
-            "[1]".to_string()
-        } else {
-            format!("{path}[1]")
-        };
-        let path3 = if path.is_empty() {
-            "[2]".to_string()
-        } else {
-            format!("{path}[2]")
-        };
-        let path4 = if path.is_empty() {
-            "[3]".to_string()
-        } else {
-            format!("{path}[3]")
-        };
-
-        let res1 = self
-            .first
-            .validate_path(&items[0], &path1, context, Some(value), messages);
-        let valid1 = match res1 {
-            Ok(val) => Some(val),
-            Err(err) => {
-                errors.merge(err);
-                if self.bail_on_fail {
-                    return Err(errors);
-                }
-                None
-            }
-        };
-
-        let res2 = self
-            .second
-            .validate_path(&items[1], &path2, context, Some(value), messages);
-        let valid2 = match res2 {
-            Ok(val) => Some(val),
-            Err(err) => {
-                errors.merge(err);
-                if self.bail_on_fail {
-                    return Err(errors);
-                }
-                None
-            }
-        };
-
-        let res3 = self
-            .third
-            .validate_path(&items[2], &path3, context, Some(value), messages);
-        let valid3 = match res3 {
-            Ok(val) => Some(val),
-            Err(err) => {
-                errors.merge(err);
-                if self.bail_on_fail {
-                    return Err(errors);
-                }
-                None
-            }
-        };
-
-        let res4 = self
-            .fourth
-            .validate_path(&items[3], &path4, context, Some(value), messages);
-        let valid4 = match res4 {
-            Ok(val) => Some(val),
-            Err(err) => {
-                errors.merge(err);
-                if self.bail_on_fail {
-                    return Err(errors);
-                }
-                None
-            }
-        };
-
-        if let (Some(v1), Some(v2), Some(v3), Some(v4)) = (valid1, valid2, valid3, valid4) {
-            Ok((v1, v2, v3, v4))
-        } else {
-            Err(errors)
-        }
-    }
-
-    #[cfg(feature = "async")]
-    fn validate_async_path<'a>(
-        &'a self,
-        value: &'a Value,
-        path: &'a str,
-        context: &'a ValidationContext,
-        parent_data: Option<&'a Value>,
-        messages: &'a dyn MessagesProvider,
-    ) -> BoxFuture<'a, Result<(T1, T2, T3, T4), ValidationError>> {
-        Box::pin(async move {
-            let rule_ctx = RuleContext::new(path, context, parent_data, messages);
-            let inline = self.inline_message.as_deref();
-
-            let items = match value {
-                Value::Array(arr) if arr.len() == 4 => arr,
-                _ => {
-                    let mut params = RuleParams::new();
-                    params.insert("length", "4");
-                    let issue = rule_ctx.create_issue("exact_items", params, inline);
-                    return Err(ValidationError::single(
-                        issue.field,
-                        issue.rule,
-                        issue.message,
-                    ));
-                }
-            };
-
-            let mut errors = ValidationError::new();
-
-            let path1 = if path.is_empty() {
-                "[0]".to_string()
-            } else {
-                format!("{path}[0]")
-            };
-            let path2 = if path.is_empty() {
-                "[1]".to_string()
-            } else {
-                format!("{path}[1]")
-            };
-            let path3 = if path.is_empty() {
-                "[2]".to_string()
-            } else {
-                format!("{path}[2]")
-            };
-            let path4 = if path.is_empty() {
-                "[3]".to_string()
-            } else {
-                format!("{path}[3]")
-            };
-
-            let res1 = self
-                .first
-                .validate_async_path(&items[0], &path1, context, Some(value), messages)
-                .await;
-            let valid1 = match res1 {
-                Ok(val) => Some(val),
-                Err(err) => {
-                    errors.merge(err);
-                    if self.bail_on_fail {
-                        return Err(errors);
-                    }
-                    None
-                }
-            };
-
-            let res2 = self
-                .second
-                .validate_async_path(&items[1], &path2, context, Some(value), messages)
-                .await;
-            let valid2 = match res2 {
-                Ok(val) => Some(val),
-                Err(err) => {
-                    errors.merge(err);
-                    if self.bail_on_fail {
-                        return Err(errors);
-                    }
-                    None
-                }
-            };
-
-            let res3 = self
-                .third
-                .validate_async_path(&items[2], &path3, context, Some(value), messages)
-                .await;
-            let valid3 = match res3 {
-                Ok(val) => Some(val),
-                Err(err) => {
-                    errors.merge(err);
-                    if self.bail_on_fail {
-                        return Err(errors);
-                    }
-                    None
-                }
-            };
-
-            let res4 = self
-                .fourth
-                .validate_async_path(&items[3], &path4, context, Some(value), messages)
-                .await;
-            let valid4 = match res4 {
-                Ok(val) => Some(val),
-                Err(err) => {
-                    errors.merge(err);
-                    if self.bail_on_fail {
-                        return Err(errors);
-                    }
-                    None
-                }
-            };
-
-            if let (Some(v1), Some(v2), Some(v3), Some(v4)) = (valid1, valid2, valid3, valid4) {
-                Ok((v1, v2, v3, v4))
-            } else {
-                Err(errors)
-            }
-        })
-    }
-}
-
-/// Creates a 2-element tuple schema builder.
-#[must_use]
-pub fn tuple2<S1, S2, T1, T2>(first: S1, second: S2) -> Tuple2Schema<S1, S2, T1, T2>
-where
-    S1: Schema<T1>,
-    S2: Schema<T2>,
-{
-    Tuple2Schema::new(first, second)
-}
-
-/// Creates a 3-element tuple schema builder.
-#[must_use]
-pub fn tuple3<S1, S2, S3, T1, T2, T3>(
-    first: S1,
-    second: S2,
-    third: S3,
-) -> Tuple3Schema<S1, S2, S3, T1, T2, T3>
-where
-    S1: Schema<T1>,
-    S2: Schema<T2>,
-    S3: Schema<T3>,
-{
-    Tuple3Schema::new(first, second, third)
-}
-
-/// Creates a 4-element tuple schema builder.
-#[must_use]
-pub fn tuple4<S1, S2, S3, S4, T1, T2, T3, T4>(
-    first: S1,
-    second: S2,
-    third: S3,
-    fourth: S4,
-) -> Tuple4Schema<S1, S2, S3, S4, T1, T2, T3, T4>
-where
-    S1: Schema<T1>,
-    S2: Schema<T2>,
-    S3: Schema<T3>,
-    S4: Schema<T4>,
-{
-    Tuple4Schema::new(first, second, third, fourth)
-}
+define_tuple_schema!(
+    Tuple4Schema,
+    tuple4,
+    4,
+    "4",
+    (0, first, S1, T1),
+    (1, second, S2, T2),
+    (2, third, S3, T3),
+    (3, fourth, S4, T4)
+);
 
 /// Creates a 2-element tuple schema builder (ergonomic alias for `tuple2`).
 #[must_use]
@@ -801,3 +285,201 @@ where
 {
     tuple2(first, second)
 }
+
+macro_rules! impl_schema_for_rust_tuple {
+    ($len:expr, $len_str:expr, $( ($idx:tt, $item:ident, $schema_ty:ident, $val_ty:ident) ),+) => {
+        impl<$( $schema_ty, )+ $( $val_ty, )+> Schema<($( $val_ty, )+)> for ($( $schema_ty, )+)
+        where
+            $( $schema_ty: Schema<$val_ty>, )+
+            $( $val_ty: Send + Sync + 'static, )+
+        {
+            fn validate_path(
+                &self,
+                value: &Value,
+                path: &str,
+                context: &ValidationContext,
+                parent_data: Option<&Value>,
+                messages: &dyn MessagesProvider,
+            ) -> Result<($( $val_ty, )+), ValidationError> {
+                let rule_ctx = RuleContext::new(path, context, parent_data, messages);
+                let items = match value {
+                    Value::Array(arr) if arr.len() == $len => arr,
+                    _ => {
+                        let mut params = RuleParams::new();
+                        params.insert("length", $len_str);
+                        let issue = rule_ctx.create_issue("exact_items", params, None);
+                        return Err(ValidationError::single(
+                            issue.field,
+                            issue.rule,
+                            issue.message,
+                        ));
+                    }
+                };
+
+                let mut errors = ValidationError::new();
+                $(
+                    let sub_path = if path.is_empty() {
+                        std::borrow::Cow::Borrowed(concat!("[", stringify!($idx), "]"))
+                    } else {
+                        std::borrow::Cow::Owned(format!("{}[{}]", path, $idx))
+                    };
+                    let res = self.$idx.validate_path(
+                        &items[$idx],
+                        &sub_path,
+                        context,
+                        Some(value),
+                        messages,
+                    );
+                    let $item = match res {
+                        Ok(v) => Some(v),
+                        Err(e) => {
+                            errors.merge(e);
+                            None
+                        }
+                    };
+                )+
+
+                if let ($( Some($item), )+) = ($( $item, )+) {
+                    Ok(($( $item, )+))
+                } else {
+                    Err(errors)
+                }
+            }
+
+            fn check_path(
+                &self,
+                value: &Value,
+                path: &str,
+                context: &ValidationContext,
+                parent_data: Option<&Value>,
+                messages: &dyn MessagesProvider,
+            ) -> Result<(), ValidationError> {
+                let items = match value {
+                    Value::Array(arr) if arr.len() == $len => arr,
+                    _ => {
+                        return self.validate_path(value, path, context, parent_data, messages).map(|_| ());
+                    }
+                };
+
+                let mut errors = ValidationError::new();
+                $(
+                    let sub_path = if path.is_empty() {
+                        std::borrow::Cow::Borrowed(concat!("[", stringify!($idx), "]"))
+                    } else {
+                        std::borrow::Cow::Owned(format!("{}[{}]", path, $idx))
+                    };
+                    if let Err(e) = self.$idx.check_path(
+                        &items[$idx],
+                        &sub_path,
+                        context,
+                        Some(value),
+                        messages,
+                    ) {
+                        errors.merge(e);
+                    }
+                )+
+
+                if errors.is_empty() {
+                    Ok(())
+                } else {
+                    Err(errors)
+                }
+            }
+
+            #[cfg(feature = "async")]
+            fn validate_async_path<'a>(
+                &'a self,
+                value: &'a Value,
+                path: &'a str,
+                context: &'a ValidationContext,
+                parent_data: Option<&'a Value>,
+                messages: &'a dyn MessagesProvider,
+            ) -> BoxFuture<'a, Result<($( $val_ty, )+), ValidationError>> {
+                Box::pin(async move {
+                    let rule_ctx = RuleContext::new(path, context, parent_data, messages);
+                    let items = match value {
+                        Value::Array(arr) if arr.len() == $len => arr,
+                        _ => {
+                            let mut params = RuleParams::new();
+                            params.insert("length", $len_str);
+                            let issue = rule_ctx.create_issue("exact_items", params, None);
+                            return Err(ValidationError::single(
+                                issue.field,
+                                issue.rule,
+                                issue.message,
+                            ));
+                        }
+                    };
+
+                    let mut errors = ValidationError::new();
+                    $(
+                        let sub_path = if path.is_empty() {
+                            format!("[{}]", $idx)
+                        } else {
+                            format!("{}[{}]", path, $idx)
+                        };
+                        let res = self
+                            .$idx
+                            .validate_async_path(
+                                &items[$idx],
+                                &sub_path,
+                                context,
+                                Some(value),
+                                messages,
+                            )
+                            .await;
+                        let $item = match res {
+                            Ok(v) => Some(v),
+                            Err(e) => {
+                                errors.merge(e);
+                                None
+                            }
+                        };
+                    )+
+
+                    if let ($( Some($item), )+) = ($( $item, )+) {
+                        Ok(($( $item, )+))
+                    } else {
+                        Err(errors)
+                    }
+                })
+            }
+        }
+    };
+}
+
+impl_schema_for_rust_tuple!(2, "2", (0, item0, S0, T0), (1, item1, S1, T1));
+impl_schema_for_rust_tuple!(
+    3,
+    "3",
+    (0, item0, S0, T0),
+    (1, item1, S1, T1),
+    (2, item2, S2, T2)
+);
+impl_schema_for_rust_tuple!(
+    4,
+    "4",
+    (0, item0, S0, T0),
+    (1, item1, S1, T1),
+    (2, item2, S2, T2),
+    (3, item3, S3, T3)
+);
+impl_schema_for_rust_tuple!(
+    5,
+    "5",
+    (0, item0, S0, T0),
+    (1, item1, S1, T1),
+    (2, item2, S2, T2),
+    (3, item3, S3, T3),
+    (4, item4, S4, T4)
+);
+impl_schema_for_rust_tuple!(
+    6,
+    "6",
+    (0, item0, S0, T0),
+    (1, item1, S1, T1),
+    (2, item2, S2, T2),
+    (3, item3, S3, T3),
+    (4, item4, S4, T4),
+    (5, item5, S5, T5)
+);

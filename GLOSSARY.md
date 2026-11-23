@@ -37,7 +37,7 @@ Weak-to-strong scalar conversion that parses strings or numbers from loosely typ
 The fail-closed security policy on an object schema (`Strip`, `Strict`, `Passthrough`) determining whether undeclared properties in incoming payloads are dropped, rejected with an error, or retained.
 
 #### Cross-Field Rule
-An object-level validation constraint defining relationships between multiple sibling fields (e.g. `same_as`, `different_from`, `required_if`, `required_without`, `after_field`, `before_field`).
+An object-level validation constraint defining relationships between multiple sibling fields (e.g. `same_as`, `different_from`, `required_if`, `required_without`, `after_field`, `before_field`). Satisfies the extensible `CrossFieldRuleValidator` trait seam, allowing both built-in rules and caller-defined custom multi-field predicates (`.cross_rule()`, `.cross_refine()`) to participate in dependency evaluation and object projections (`pick`/`omit`).
 
 #### Request Parts
 A multi-source HTTP request envelope partitioning input data into five standard components: `params`, `query`, `headers`, `cookies`, and `body`.

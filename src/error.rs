@@ -2,32 +2,86 @@
 
 use std::{collections::BTreeMap, fmt};
 
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize, Serialize,
+    de::{Deserializer, MapAccess, Visitor},
+    ser::{SerializeMap, Serializer},
+};
 
 /// Key-value parameters associated with a validation rule failure.
 ///
 /// Used for template placeholder interpolation (such as `:min`, `:max`, `:field`, `:expected`).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RuleParams {
-    params: BTreeMap<String, String>,
+    params: Vec<(String, String)>,
+}
+
+impl Serialize for RuleParams {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(self.params.len()))?;
+        for (k, v) in &self.params {
+            map.serialize_entry(k, v)?;
+        }
+        map.end()
+    }
+}
+
+struct RuleParamsVisitor;
+
+impl<'de> Visitor<'de> for RuleParamsVisitor {
+    type Value = RuleParams;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a key-value map of rule parameters")
+    }
+
+    fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
+    where
+        M: MapAccess<'de>,
+    {
+        let mut params = Vec::with_capacity(access.size_hint().unwrap_or(0));
+        while let Some((key, value)) = access.next_entry()? {
+            params.push((key, value));
+        }
+        Ok(RuleParams { params })
+    }
+}
+
+impl<'de> Deserialize<'de> for RuleParams {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_map(RuleParamsVisitor)
+    }
 }
 
 impl RuleParams {
     /// Creates an empty set of rule parameters.
     #[must_use]
+    #[inline]
     pub fn new() -> Self {
-        Self {
-            params: BTreeMap::new(),
-        }
+        Self { params: Vec::new() }
     }
 
     /// Inserts a key-value parameter into the collection.
+    #[inline]
     pub fn insert(&mut self, key: impl Into<String>, value: impl Into<String>) {
-        self.params.insert(key.into(), value.into());
+        let key_str = key.into();
+        let val_str = value.into();
+        if let Some(entry) = self.params.iter_mut().find(|(k, _)| k == &key_str) {
+            entry.1 = val_str;
+        } else {
+            self.params.push((key_str, val_str));
+        }
     }
 
     /// Builder method to insert a key-value parameter.
     #[must_use]
+    #[inline]
     pub fn with(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.insert(key, value);
         self
@@ -35,34 +89,47 @@ impl RuleParams {
 
     /// Looks up a parameter value by key.
     #[must_use]
+    #[inline]
     pub fn get(&self, key: &str) -> Option<&str> {
-        self.params.get(key).map(String::as_str)
+        self.params
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
     }
 
     /// Returns an iterator over all key-value parameter pairs.
+    #[inline]
     pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
         self.params.iter().map(|(k, v)| (k.as_str(), v.as_str()))
     }
 
     /// Returns `true` if the collection contains a parameter with the specified key.
     #[must_use]
+    #[inline]
     pub fn contains(&self, key: &str) -> bool {
-        self.params.contains_key(key)
+        self.params.iter().any(|(k, _)| k == key)
     }
 
     /// Removes a parameter by key, returning its value if present.
+    #[inline]
     pub fn remove(&mut self, key: &str) -> Option<String> {
-        self.params.remove(key)
+        if let Some(pos) = self.params.iter().position(|(k, _)| k == key) {
+            Some(self.params.remove(pos).1)
+        } else {
+            None
+        }
     }
 
     /// Returns `true` if the collection contains no parameters.
     #[must_use]
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.params.is_empty()
     }
 
     /// Returns the number of parameters stored.
     #[must_use]
+    #[inline]
     pub fn len(&self) -> usize {
         self.params.len()
     }

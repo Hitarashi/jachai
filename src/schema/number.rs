@@ -283,13 +283,19 @@ impl NumberSchema {
                 }
             }
             NumberPredicate::MultipleOf(step) => {
-                let remainder = (value / *step).fract();
-                if remainder.abs() > f64::EPSILON && (1.0 - remainder).abs() > f64::EPSILON {
+                if *step == 0.0 || step.is_nan() {
                     let mut params = RuleParams::new();
                     params.insert("step", step.to_string());
                     Some(rule_context.create_issue("multiple_of", params, inline))
                 } else {
-                    None
+                    let remainder = (value / *step).fract();
+                    if remainder.abs() > f64::EPSILON && (1.0 - remainder).abs() > f64::EPSILON {
+                        let mut params = RuleParams::new();
+                        params.insert("step", step.to_string());
+                        Some(rule_context.create_issue("multiple_of", params, inline))
+                    } else {
+                        None
+                    }
                 }
             }
             NumberPredicate::DecimalPlaces(max_places) => {
@@ -360,6 +366,7 @@ impl NumberSchema {
     }
 
     /// Checks that a 64-bit float conforms to all bounds rules without requiring `Value` wrappers.
+    #[inline]
     pub fn check_f64(&self, input: f64) -> Result<(), ValidationError> {
         if self
             .predicates
@@ -395,6 +402,7 @@ impl NumberSchema {
     }
 
     /// Validates a 64-bit float, returning it on success.
+    #[inline]
     pub fn validate_f64(&self, input: f64) -> Result<f64, ValidationError> {
         self.check_f64(input).map(|_| input)
     }
@@ -794,6 +802,7 @@ impl IntegerSchema {
     }
 
     /// Checks that a 64-bit integer conforms to all bounds rules without requiring `Value` wrappers.
+    #[inline]
     pub fn check_i64(&self, input: i64) -> Result<(), ValidationError> {
         let val_f64 = input as f64;
         for predicate in &self.inner.predicates {
@@ -845,6 +854,7 @@ impl IntegerSchema {
     }
 
     /// Validates a 64-bit integer, returning it on success.
+    #[inline]
     pub fn validate_i64(&self, input: i64) -> Result<i64, ValidationError> {
         self.inner.check_f64(input as f64).map(|_| input)
     }

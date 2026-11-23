@@ -289,3 +289,109 @@ fn test_validation_context_typemap() {
     let result = s.validate_with_context(&json!({ "resource": "assets" }), &context);
     assert!(result.is_ok());
 }
+
+#[test]
+fn test_object_schema_custom_cross_field_refine() {
+    let schema = object()
+        .field("start_num", integer())
+        .field("end_num", integer())
+        .cross_refine(
+            &["start_num", "end_num"],
+            |map| {
+                let start = map.get("start_num").and_then(|v| v.as_i64()).unwrap_or(0);
+                let end = map.get("end_num").and_then(|v| v.as_i64()).unwrap_or(0);
+                start < end
+            },
+            "less_than",
+            "start_num must be less than end_num",
+        );
+
+    let valid = json!({ "start_num": 10, "end_num": 20 });
+    assert!(schema.validate(&valid).is_ok());
+
+    let invalid = json!({ "start_num": 20, "end_num": 10 });
+    let err = schema.validate(&invalid).unwrap_err();
+    assert_eq!(
+        err.first_message(),
+        Some("start_num must be less than end_num")
+    );
+}
+
+#[test]
+fn test_object_schema_custom_cross_rule_validator_trait() {
+    struct PasswordMatchRule;
+
+    impl CrossFieldRuleValidator for PasswordMatchRule {
+        fn evaluate(
+            &self,
+            map: &serde_json::Map<String, serde_json::Value>,
+            path: &str,
+            ctx: &RuleContext<'_>,
+        ) -> Option<ValidationIssue> {
+            let pass = map.get("password").and_then(|v| v.as_str());
+            let confirm = map.get("confirm_password").and_then(|v| v.as_str());
+            if pass != confirm {
+                let target = if path.is_empty() {
+                    "confirm_password".to_string()
+                } else {
+                    format!("{path}.confirm_password")
+                };
+                Some(ctx.create_issue_at(
+                    &target,
+                    "password_match",
+                    RuleParams::new(),
+                    Some("Passwords do not match"),
+                ))
+            } else {
+                None
+            }
+        }
+
+        fn references_only(&self, keys: &[&str]) -> bool {
+            keys.contains(&"password") && keys.contains(&"confirm_password")
+        }
+
+        fn references_any(&self, keys: &[&str]) -> bool {
+            keys.contains(&"password") || keys.contains(&"confirm_password")
+        }
+    }
+
+    let schema = object()
+        .field("password", string().min_len(8))
+        .field("confirm_password", string())
+        .cross_rule(PasswordMatchRule);
+
+    let valid = json!({
+        "password": "supersecretpassword",
+        "confirm_password": "supersecretpassword"
+    });
+    assert!(schema.validate(&valid).is_ok());
+
+    let invalid = json!({
+        "password": "supersecretpassword",
+        "confirm_password": "wrongpassword"
+    });
+    let err = schema.validate(&invalid).unwrap_err();
+    assert_eq!(err.first_message(), Some("Passwords do not match"));
+
+    // Test projection with custom cross-field rule
+    let picked = schema.clone().pick(&["password"]);
+    assert!(
+        picked
+            .validate(&json!({ "password": "supersecretpassword" }))
+            .is_ok()
+    );
+}
+
+#[test]
+fn test_object_schema_pre_sanitization() {
+    let schema = object()
+        .sanitize(true)
+        .field("name", string().without_trim())
+        .field("bio", string().nullable());
+
+    let input = json!({ "name": "  Alice  ", "bio": "   " });
+    let validated = schema.validate(&input).unwrap();
+    assert_eq!(validated["name"], "Alice");
+    assert_eq!(validated["bio"], serde_json::Value::Null);
+}

@@ -114,14 +114,15 @@ pub(crate) fn is_valid_email_fast(s: &str) -> bool {
             }
             has_dot = true;
             label_len = 0;
-        } else {
-            if label_len == 0 {
-                if !b.is_ascii_alphanumeric() {
-                    return false;
-                }
-            } else if !VALID_DOMAIN_CHAR[b as usize] {
+        } else if label_len == 0 {
+            if !b.is_ascii_alphanumeric() {
                 return false;
             }
+            label_len = 1;
+            last_byte = b;
+        } else if !VALID_DOMAIN_CHAR[b as usize] {
+            return false;
+        } else {
             label_len += 1;
             last_byte = b;
         }
@@ -145,15 +146,59 @@ pub(crate) fn is_valid_uuid_fast(s: &str) -> bool {
     if !matches!(bytes[19], b'8' | b'9' | b'a' | b'b' | b'A' | b'B') {
         return false;
     }
-    for (i, &b) in bytes.iter().enumerate() {
-        if i == 8 || i == 13 || i == 18 || i == 23 || i == 14 || i == 19 {
-            continue;
-        }
-        if !b.is_ascii_hexdigit() {
+
+    #[inline(always)]
+    fn is_hex_slice(slice: &[u8]) -> bool {
+        slice.iter().all(|b| b.is_ascii_hexdigit())
+    }
+
+    is_hex_slice(&bytes[0..8])
+        && is_hex_slice(&bytes[9..13])
+        && is_hex_slice(&bytes[15..18])
+        && is_hex_slice(&bytes[20..23])
+        && is_hex_slice(&bytes[24..36])
+}
+
+#[inline]
+pub(crate) fn is_valid_ipv4_fast(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    if bytes.len() < 7 || bytes.len() > 15 {
+        return false;
+    }
+    let mut octets = 0;
+    let mut current: u32 = 0;
+    let mut has_digits = false;
+    let mut leading_zero = false;
+
+    for &b in bytes {
+        if b == b'.' {
+            if !has_digits || current > 255 {
+                return false;
+            }
+            octets += 1;
+            if octets > 3 {
+                return false;
+            }
+            current = 0;
+            has_digits = false;
+            leading_zero = false;
+        } else if b.is_ascii_digit() {
+            if leading_zero {
+                return false;
+            }
+            if !has_digits && b == b'0' {
+                leading_zero = true;
+            }
+            has_digits = true;
+            current = current * 10 + (b - b'0') as u32;
+            if current > 255 {
+                return false;
+            }
+        } else {
             return false;
         }
     }
-    true
+    octets == 3 && has_digits && current <= 255
 }
 
 #[inline]
@@ -1149,38 +1194,52 @@ impl StringSchema {
 
         match predicate {
             StringPredicate::MinLen(min) => {
-                let char_count = if value.is_ascii() {
-                    value.len()
-                } else {
-                    value.chars().count()
-                };
-                if char_count < *min {
-                    let mut params = RuleParams::new();
-                    params.insert("min", min.to_string());
-                    params.insert("actual", char_count.to_string());
-                    Some(rule_context.create_issue("min_len", params, inline))
-                } else {
+                let bytes_len = value.len();
+                if bytes_len >= min.saturating_mul(4) {
                     None
+                } else {
+                    let char_count = if bytes_len < *min || value.is_ascii() {
+                        bytes_len
+                    } else {
+                        value.chars().count()
+                    };
+                    if char_count < *min {
+                        let mut params = RuleParams::new();
+                        params.insert("min", min.to_string());
+                        params.insert("actual", char_count.to_string());
+                        Some(rule_context.create_issue("min_len", params, inline))
+                    } else {
+                        None
+                    }
                 }
             }
             StringPredicate::MaxLen(max) => {
-                let char_count = if value.is_ascii() {
-                    value.len()
-                } else {
-                    value.chars().count()
-                };
-                if char_count > *max {
-                    let mut params = RuleParams::new();
-                    params.insert("max", max.to_string());
-                    params.insert("actual", char_count.to_string());
-                    Some(rule_context.create_issue("max_len", params, inline))
-                } else {
+                let bytes_len = value.len();
+                if bytes_len <= *max {
                     None
+                } else {
+                    let char_count = if bytes_len > max.saturating_mul(4) || value.is_ascii() {
+                        bytes_len
+                    } else {
+                        value.chars().count()
+                    };
+                    if char_count > *max {
+                        let mut params = RuleParams::new();
+                        params.insert("max", max.to_string());
+                        params.insert("actual", char_count.to_string());
+                        Some(rule_context.create_issue("max_len", params, inline))
+                    } else {
+                        None
+                    }
                 }
             }
             StringPredicate::ExactLen(expected) => {
-                let char_count = if value.is_ascii() {
-                    value.len()
+                let bytes_len = value.len();
+                let char_count = if bytes_len < *expected
+                    || bytes_len > expected.saturating_mul(4)
+                    || value.is_ascii()
+                {
+                    bytes_len
                 } else {
                     value.chars().count()
                 };
@@ -1826,7 +1885,7 @@ impl StringSchema {
                 let bytes_len = value.len();
                 if bytes_len < *expected {
                     false
-                } else if bytes_len >= expected.saturating_mul(4) {
+                } else if bytes_len >= expected.saturating_mul(4) || value.is_ascii() {
                     true
                 } else {
                     value.chars().take(*expected).count() == *expected
@@ -1836,7 +1895,7 @@ impl StringSchema {
                 let bytes_len = value.len();
                 if bytes_len <= *expected {
                     true
-                } else if bytes_len > expected.saturating_mul(4) {
+                } else if bytes_len > expected.saturating_mul(4) || value.is_ascii() {
                     false
                 } else {
                     value.chars().take(expected + 1).count() <= *expected
@@ -1846,6 +1905,8 @@ impl StringSchema {
                 let bytes_len = value.len();
                 if bytes_len < *expected || bytes_len > expected.saturating_mul(4) {
                     false
+                } else if bytes_len == *expected && value.is_ascii() {
+                    true
                 } else {
                     value.chars().take(expected + 1).count() == *expected
                 }
@@ -1853,8 +1914,8 @@ impl StringSchema {
             StringPredicate::Email => is_valid_email_fast(value),
             StringPredicate::Url => is_valid_url_fast(value),
             StringPredicate::Uuid => is_valid_uuid_fast(value),
-            StringPredicate::Ip => IpAddr::from_str(value).is_ok(),
-            StringPredicate::Ipv4 => Ipv4Addr::from_str(value).is_ok(),
+            StringPredicate::Ip => is_valid_ipv4_fast(value) || Ipv6Addr::from_str(value).is_ok(),
+            StringPredicate::Ipv4 => is_valid_ipv4_fast(value),
             StringPredicate::Ipv6 => Ipv6Addr::from_str(value).is_ok(),
             StringPredicate::Date => crate::schema::date::is_valid_rfc3339_date(value),
             StringPredicate::Time => crate::schema::date::is_valid_rfc3339_time(value),
@@ -1868,9 +1929,23 @@ impl StringSchema {
             StringPredicate::StartsWith(prefix) => value.starts_with(prefix),
             StringPredicate::EndsWith(suffix) => value.ends_with(suffix),
             StringPredicate::Contains(sub) => value.contains(sub),
-            StringPredicate::Alpha => !value.is_empty() && value.chars().all(char::is_alphabetic),
+            StringPredicate::Alpha => {
+                if value.is_empty() {
+                    false
+                } else if value.is_ascii() {
+                    value.bytes().all(|b| b.is_ascii_alphabetic())
+                } else {
+                    value.chars().all(char::is_alphabetic)
+                }
+            }
             StringPredicate::Alphanumeric => {
-                !value.is_empty() && value.chars().all(char::is_alphanumeric)
+                if value.is_empty() {
+                    false
+                } else if value.is_ascii() {
+                    value.bytes().all(|b| b.is_ascii_alphanumeric())
+                } else {
+                    value.chars().all(char::is_alphanumeric)
+                }
             }
             StringPredicate::Ascii => value.is_ascii(),
             _ => {
@@ -1899,6 +1974,7 @@ impl StringSchema {
     }
 
     /// Checks that a string slice conforms to all validation rules without requiring `Value` wrappers or heap allocations.
+    #[inline]
     pub fn check_str(&self, input: &str) -> Result<(), ValidationError> {
         if !self.has_transform()
             && (!self.empty_as_null || !input.is_empty())

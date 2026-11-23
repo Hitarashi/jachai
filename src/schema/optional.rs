@@ -48,6 +48,22 @@ where
             .map(Some)
     }
 
+    fn check_path(
+        &self,
+        value: &Value,
+        path: &str,
+        context: &ValidationContext,
+        parent_data: Option<&Value>,
+        messages: &dyn MessagesProvider,
+    ) -> Result<(), ValidationError> {
+        if value.is_null() {
+            return Ok(());
+        }
+
+        self.inner
+            .check_path(value, path, context, parent_data, messages)
+    }
+
     #[cfg(feature = "async")]
     fn validate_async_path<'a>(
         &'a self,
@@ -116,6 +132,22 @@ where
         self.inner
             .validate_path(value, path, context, parent_data, messages)
             .map(Some)
+    }
+
+    fn check_path(
+        &self,
+        value: &Value,
+        path: &str,
+        context: &ValidationContext,
+        parent_data: Option<&Value>,
+        messages: &dyn MessagesProvider,
+    ) -> Result<(), ValidationError> {
+        if value.is_null() {
+            return Ok(());
+        }
+
+        self.inner
+            .check_path(value, path, context, parent_data, messages)
     }
 
     #[cfg(feature = "async")]
@@ -203,6 +235,22 @@ where
 
         self.inner
             .validate_path(value, path, context, parent_data, messages)
+    }
+
+    fn check_path(
+        &self,
+        value: &Value,
+        path: &str,
+        context: &ValidationContext,
+        parent_data: Option<&Value>,
+        messages: &dyn MessagesProvider,
+    ) -> Result<(), ValidationError> {
+        if value.is_null() {
+            return Ok(());
+        }
+
+        self.inner
+            .check_path(value, path, context, parent_data, messages)
     }
 
     #[cfg(feature = "async")]
