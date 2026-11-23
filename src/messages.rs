@@ -1,6 +1,25 @@
 //! Localized error message templates, placeholder interpolation, and cascading message providers.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{Arc, LazyLock},
+};
+
+static BUILT_IN_PROVIDER: LazyLock<SimpleMessagesProvider> = LazyLock::new(|| {
+    let mut provider = SimpleMessagesProvider {
+        rule_defaults: HashMap::new(),
+        field_overrides: HashMap::new(),
+        field_labels: HashMap::new(),
+    };
+    provider.init_built_in_defaults();
+    provider
+});
+
+/// Returns a shared, statically cached reference to the built-in messages provider.
+#[must_use]
+pub fn default_messages_provider() -> &'static SimpleMessagesProvider {
+    &BUILT_IN_PROVIDER
+}
 
 use crate::error::RuleParams;
 
@@ -34,13 +53,7 @@ pub struct SimpleMessagesProvider {
 
 impl Default for SimpleMessagesProvider {
     fn default() -> Self {
-        let mut provider = Self {
-            rule_defaults: HashMap::new(),
-            field_overrides: HashMap::new(),
-            field_labels: HashMap::new(),
-        };
-        provider.init_built_in_defaults();
-        provider
+        BUILT_IN_PROVIDER.clone()
     }
 }
 

@@ -8,10 +8,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::{
-    context::ValidationContext,
-    error::ValidationError,
-    messages::{MessagesProvider, SimpleMessagesProvider},
-    schema::Schema,
+    context::ValidationContext, error::ValidationError, messages::MessagesProvider, schema::Schema,
 };
 
 /// Discrete source components of an incoming HTTP request envelope.
@@ -362,14 +359,14 @@ impl RequestSchema {
         parts: &RequestParts,
         context: &ValidationContext,
     ) -> Result<ValidatedRequest, ValidationError> {
-        let messages = SimpleMessagesProvider::default();
+        let messages = crate::messages::default_messages_provider();
         let mut errors = ValidationError::new();
         let mut validated = ValidatedRequest::default();
 
         for kind in RequestPartKind::ALL {
             if let Some(schema) = &self.parts[kind as usize] {
                 let input_val = parts.get_part(kind);
-                match schema.validate_part(input_val, kind.name(), context, &messages) {
+                match schema.validate_part(input_val, kind.name(), context, messages) {
                     Ok(val) => validated.set_part(kind, val),
                     Err(err) => {
                         errors.merge(err);
@@ -405,7 +402,7 @@ impl RequestSchema {
         parts: &RequestParts,
         context: &ValidationContext,
     ) -> Result<ValidatedRequest, ValidationError> {
-        let messages = SimpleMessagesProvider::default();
+        let messages = crate::messages::default_messages_provider();
         let mut errors = ValidationError::new();
         let mut validated = ValidatedRequest::default();
 
@@ -413,7 +410,7 @@ impl RequestSchema {
             if let Some(schema) = &self.parts[kind as usize] {
                 let input_val = parts.get_part(kind);
                 match schema
-                    .validate_async_part(input_val, kind.name(), context, &messages)
+                    .validate_async_part(input_val, kind.name(), context, messages)
                     .await
                 {
                     Ok(val) => validated.set_part(kind, val),

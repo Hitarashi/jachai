@@ -20,3 +20,7 @@ coverage:
 # Lint with clippy.
 clippy *args:
     cargo clippy --all-targets --all-features {{ args }}
+
+# Run cross-ecosystem benchmark suite.
+bench:
+    python3 benches/run_all.py

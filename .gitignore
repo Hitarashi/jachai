@@ -3,3 +3,6 @@
 .idea
 
 *.proptest-regressions
+
+node_modules
+corpus.json
