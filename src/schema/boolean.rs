@@ -52,6 +52,35 @@ impl BooleanSchema {
         self.inline_message = Some(message.into());
         self
     }
+
+    /// Checks that a boolean conforms to all rules without requiring `Value` wrappers.
+    pub fn check_bool(&self, input: bool) -> Result<(), ValidationError> {
+        if self.must_be_accepted && !input {
+            let context = ValidationContext::new();
+            let rule_ctx = RuleContext::new(
+                "",
+                &context,
+                None,
+                crate::messages::default_messages_provider(),
+            );
+            let issue = rule_ctx.create_issue(
+                "accepted",
+                RuleParams::new(),
+                self.inline_message.as_deref(),
+            );
+            return Err(ValidationError::single(
+                issue.field,
+                issue.rule,
+                issue.message,
+            ));
+        }
+        Ok(())
+    }
+
+    /// Validates a boolean, returning it on success.
+    pub fn validate_bool(&self, input: bool) -> Result<bool, ValidationError> {
+        self.check_bool(input).map(|_| input)
+    }
 }
 
 impl Schema<bool> for BooleanSchema {
@@ -65,25 +94,28 @@ impl Schema<bool> for BooleanSchema {
     ) -> Result<bool, ValidationError> {
         let rule_ctx = RuleContext::new(path, context, parent_data, messages);
 
-        let parsed_bool = match coerce_to_bool(value) {
-            Some(b) => b,
-            None => {
-                let rule_name = if value.is_null() {
-                    "required"
-                } else {
-                    "boolean"
-                };
-                let issue = rule_ctx.create_issue(
-                    rule_name,
-                    RuleParams::new(),
-                    self.inline_message.as_deref(),
-                );
-                return Err(ValidationError::single(
-                    issue.field,
-                    issue.rule,
-                    issue.message,
-                ));
-            }
+        let parsed_bool = match value {
+            Value::Bool(b) => *b,
+            _ => match coerce_to_bool(value) {
+                Some(b) => b,
+                None => {
+                    let rule_name = if value.is_null() {
+                        "required"
+                    } else {
+                        "boolean"
+                    };
+                    let issue = rule_ctx.create_issue(
+                        rule_name,
+                        RuleParams::new(),
+                        self.inline_message.as_deref(),
+                    );
+                    return Err(ValidationError::single(
+                        issue.field,
+                        issue.rule,
+                        issue.message,
+                    ));
+                }
+            },
         };
 
         if self.must_be_accepted && !parsed_bool {
@@ -100,6 +132,56 @@ impl Schema<bool> for BooleanSchema {
         }
 
         Ok(parsed_bool)
+    }
+
+    fn check_path(
+        &self,
+        value: &Value,
+        path: &str,
+        context: &ValidationContext,
+        parent_data: Option<&Value>,
+        messages: &dyn MessagesProvider,
+    ) -> Result<(), ValidationError> {
+        let rule_ctx = RuleContext::new(path, context, parent_data, messages);
+
+        let parsed_bool = match value {
+            Value::Bool(b) => *b,
+            _ => match coerce_to_bool(value) {
+                Some(b) => b,
+                None => {
+                    let rule_name = if value.is_null() {
+                        "required"
+                    } else {
+                        "boolean"
+                    };
+                    let issue = rule_ctx.create_issue(
+                        rule_name,
+                        RuleParams::new(),
+                        self.inline_message.as_deref(),
+                    );
+                    return Err(ValidationError::single(
+                        issue.field,
+                        issue.rule,
+                        issue.message,
+                    ));
+                }
+            },
+        };
+
+        if self.must_be_accepted && !parsed_bool {
+            let issue = rule_ctx.create_issue(
+                "accepted",
+                RuleParams::new(),
+                self.inline_message.as_deref(),
+            );
+            return Err(ValidationError::single(
+                issue.field,
+                issue.rule,
+                issue.message,
+            ));
+        }
+
+        Ok(())
     }
 
     fn to_json_schema_value(&self) -> Value {

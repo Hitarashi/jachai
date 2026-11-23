@@ -10,16 +10,18 @@ Benchmarked on canonical corpus across **Rust (jachai, garde, validator, zod-rs)
 | Ecosystem / Library | Runtime / Paradigm | Latency (ns/op) | Throughput (M ops/s) | Speedup vs Reference |
 | :--- | :--- | :--- | :--- | :--- |
 | Go (go-playground/validator) | Go Runtime / Reflection | **109.5 ns** | **9.13 M** | 1.00x (Fastest) |
-| Rust (garde (in-memory struct)) | Native / Compiled | **275.4 ns** | **3.63 M** | 2.51x |
-| Rust (validator (in-memory struct)) | Native / Compiled | **479.3 ns** | **2.09 M** | 4.38x |
-| Node.js (Valibot (sync)) | V8 JIT | **503.7 ns** | **1.99 M** | 4.60x |
-| Node.js (Zod (sync)) | V8 JIT | **862.1 ns** | **1.16 M** | 7.87x |
-| **Rust (jachai)** | Native / Compiled | **1187.4 ns** | **0.84 M** | 10.84x |
-| Rust (zod-rs) | Native / Compiled | **1202.9 ns** | **0.83 M** | 10.99x |
-| Bun (Zod (sync)) | JavaScriptCore JIT | **1894.7 ns** | **0.53 M** | 17.30x |
-| Bun (Valibot (sync)) | JavaScriptCore JIT | **2474.0 ns** | **0.40 M** | 22.59x |
-| Node.js (VineJS (async)) | V8 JIT | **3855.7 ns** | **0.26 M** | 35.21x |
-| Bun (VineJS (async)) | JavaScriptCore JIT | **14332.6 ns** | **0.07 M** | 130.89x |
+| Rust (garde (in-memory struct)) | Native / Compiled | **132.9 ns** | **7.52 M** | 1.21x |
+| **Rust (jachai (typed struct))** | Native / Compiled | **202.2 ns** | **4.95 M** | 1.85x |
+| Rust (validator (in-memory struct)) | Native / Compiled | **207.1 ns** | **4.83 M** | 1.89x |
+| **Rust (jachai (check / in-place))** | Native / Compiled | **292.8 ns** | **3.42 M** | 2.67x |
+| Rust (zod-rs) | Native / Compiled | **587.6 ns** | **1.70 M** | 5.37x |
+| **Rust (jachai)** | Native / Compiled | **613.1 ns** | **1.63 M** | 5.60x |
+| Node.js (Valibot (sync)) | V8 JIT | **629.6 ns** | **1.59 M** | 5.75x |
+| Bun (Zod (sync)) | JavaScriptCore JIT | **902.3 ns** | **1.11 M** | 8.24x |
+| Bun (Valibot (sync)) | JavaScriptCore JIT | **932.3 ns** | **1.07 M** | 8.51x |
+| Node.js (Zod (sync)) | V8 JIT | **999.7 ns** | **1.00 M** | 9.13x |
+| Node.js (VineJS (async)) | V8 JIT | **4183.1 ns** | **0.24 M** | 38.20x |
+| Bun (VineJS (async)) | JavaScriptCore JIT | **5093.3 ns** | **0.20 M** | 46.51x |
 
 ### 2. Flat Object Validation (Failure / Error Path)
 
@@ -27,17 +29,19 @@ Benchmarked on canonical corpus across **Rust (jachai, garde, validator, zod-rs)
 
 | Ecosystem / Library | Runtime / Paradigm | Latency (ns/op) | Throughput (M ops/s) | Speedup vs Reference |
 | :--- | :--- | :--- | :--- | :--- |
-| Rust (garde (in-memory struct)) | Native / Compiled | **264.9 ns** | **3.78 M** | 1.00x (Fastest) |
-| Go (go-playground/validator) | Go Runtime / Reflection | **286.6 ns** | **3.49 M** | 1.08x |
-| Rust (validator (in-memory struct)) | Native / Compiled | **310.2 ns** | **3.22 M** | 1.17x |
-| Rust (zod-rs) | Native / Compiled | **499.3 ns** | **2.00 M** | 1.88x |
-| Node.js (Valibot (sync)) | V8 JIT | **851.3 ns** | **1.17 M** | 3.21x |
-| Node.js (Zod (sync)) | V8 JIT | **2202.8 ns** | **0.45 M** | 8.32x |
-| Bun (Valibot (sync)) | JavaScriptCore JIT | **3077.5 ns** | **0.32 M** | 11.62x |
-| Bun (Zod (sync)) | JavaScriptCore JIT | **4597.9 ns** | **0.22 M** | 17.36x |
-| **Rust (jachai)** | Native / Compiled | **4755.0 ns** | **0.21 M** | 17.95x |
-| Node.js (VineJS (async)) | V8 JIT | **16756.7 ns** | **0.06 M** | 63.26x |
-| Bun (VineJS (async)) | JavaScriptCore JIT | **22781.6 ns** | **0.04 M** | 86.01x |
+| Go (go-playground/validator) | Go Runtime / Reflection | **286.6 ns** | **3.49 M** | 1.00x (Fastest) |
+| Rust (garde (in-memory struct)) | Native / Compiled | **346.7 ns** | **2.88 M** | 1.21x |
+| Rust (validator (in-memory struct)) | Native / Compiled | **403.2 ns** | **2.48 M** | 1.41x |
+| **Rust (jachai (typed struct))** | Native / Compiled | **629.6 ns** | **1.59 M** | 2.20x |
+| Rust (zod-rs) | Native / Compiled | **644.8 ns** | **1.55 M** | 2.25x |
+| Node.js (Valibot (sync)) | V8 JIT | **837.0 ns** | **1.19 M** | 2.92x |
+| Bun (Zod (sync)) | JavaScriptCore JIT | **909.8 ns** | **1.10 M** | 3.17x |
+| **Rust (jachai (check / in-place))** | Native / Compiled | **1027.2 ns** | **0.97 M** | 3.58x |
+| **Rust (jachai)** | Native / Compiled | **1270.7 ns** | **0.79 M** | 4.43x |
+| Bun (Valibot (sync)) | JavaScriptCore JIT | **2081.2 ns** | **0.48 M** | 7.26x |
+| Node.js (Zod (sync)) | V8 JIT | **2198.0 ns** | **0.45 M** | 7.67x |
+| Bun (VineJS (async)) | JavaScriptCore JIT | **9367.9 ns** | **0.11 M** | 32.69x |
+| Node.js (VineJS (async)) | V8 JIT | **18624.1 ns** | **0.05 M** | 64.98x |
 
 ### 3. Nested Object Validation (Success Path)
 
@@ -45,17 +49,19 @@ Benchmarked on canonical corpus across **Rust (jachai, garde, validator, zod-rs)
 
 | Ecosystem / Library | Runtime / Paradigm | Latency (ns/op) | Throughput (M ops/s) | Speedup vs Reference |
 | :--- | :--- | :--- | :--- | :--- |
-| Rust (garde (in-memory struct)) | Native / Compiled | **106.7 ns** | **9.37 M** | 1.00x (Fastest) |
-| Rust (validator (in-memory struct)) | Native / Compiled | **240.4 ns** | **4.16 M** | 2.25x |
-| Go (go-playground/validator) | Go Runtime / Reflection | **576.0 ns** | **1.74 M** | 5.40x |
-| Bun (Zod (sync)) | JavaScriptCore JIT | **674.0 ns** | **1.48 M** | 6.32x |
-| Node.js (Valibot (sync)) | V8 JIT | **772.6 ns** | **1.29 M** | 7.24x |
-| Rust (zod-rs) | Native / Compiled | **850.9 ns** | **1.18 M** | 7.98x |
-| Node.js (Zod (sync)) | V8 JIT | **999.0 ns** | **1.00 M** | 9.36x |
-| **Rust (jachai)** | Native / Compiled | **1130.8 ns** | **0.88 M** | 10.60x |
-| Bun (Valibot (sync)) | JavaScriptCore JIT | **1170.7 ns** | **0.85 M** | 10.97x |
-| Node.js (VineJS (async)) | V8 JIT | **4048.0 ns** | **0.25 M** | 37.94x |
-| Bun (VineJS (async)) | JavaScriptCore JIT | **5821.7 ns** | **0.17 M** | 54.56x |
+| Rust (garde (in-memory struct)) | Native / Compiled | **136.8 ns** | **7.31 M** | 1.00x (Fastest) |
+| Rust (validator (in-memory struct)) | Native / Compiled | **308.1 ns** | **3.25 M** | 2.25x |
+| **Rust (jachai (typed struct))** | Native / Compiled | **327.2 ns** | **3.06 M** | 2.39x |
+| Go (go-playground/validator) | Go Runtime / Reflection | **576.0 ns** | **1.74 M** | 4.21x |
+| Node.js (Valibot (sync)) | V8 JIT | **910.3 ns** | **1.10 M** | 6.65x |
+| **Rust (jachai (check / in-place))** | Native / Compiled | **938.4 ns** | **1.07 M** | 6.86x |
+| Bun (Zod (sync)) | JavaScriptCore JIT | **1071.0 ns** | **0.93 M** | 7.83x |
+| Rust (zod-rs) | Native / Compiled | **1082.7 ns** | **0.92 M** | 7.91x |
+| Node.js (Zod (sync)) | V8 JIT | **1185.3 ns** | **0.84 M** | 8.66x |
+| **Rust (jachai)** | Native / Compiled | **1265.2 ns** | **0.79 M** | 9.25x |
+| Bun (Valibot (sync)) | JavaScriptCore JIT | **2298.2 ns** | **0.44 M** | 16.80x |
+| Node.js (VineJS (async)) | V8 JIT | **4731.2 ns** | **0.21 M** | 34.58x |
+| Bun (VineJS (async)) | JavaScriptCore JIT | **7238.8 ns** | **0.14 M** | 52.91x |
 
 ### 4. Nested Object Validation (Failure Path)
 
@@ -63,17 +69,19 @@ Benchmarked on canonical corpus across **Rust (jachai, garde, validator, zod-rs)
 
 | Ecosystem / Library | Runtime / Paradigm | Latency (ns/op) | Throughput (M ops/s) | Speedup vs Reference |
 | :--- | :--- | :--- | :--- | :--- |
-| Rust (garde (in-memory struct)) | Native / Compiled | **415.2 ns** | **2.41 M** | 1.00x (Fastest) |
-| Rust (validator (in-memory struct)) | Native / Compiled | **643.4 ns** | **1.55 M** | 1.55x |
-| Rust (zod-rs) | Native / Compiled | **772.5 ns** | **1.29 M** | 1.86x |
-| Node.js (Valibot (sync)) | V8 JIT | **1279.4 ns** | **0.78 M** | 3.08x |
-| Go (go-playground/validator) | Go Runtime / Reflection | **2001.0 ns** | **0.50 M** | 4.82x |
-| **Rust (jachai)** | Native / Compiled | **2678.0 ns** | **0.37 M** | 6.45x |
-| Node.js (Zod (sync)) | V8 JIT | **2896.5 ns** | **0.35 M** | 6.98x |
-| Bun (Zod (sync)) | JavaScriptCore JIT | **3105.7 ns** | **0.32 M** | 7.48x |
-| Bun (Valibot (sync)) | JavaScriptCore JIT | **3957.2 ns** | **0.25 M** | 9.53x |
-| Bun (VineJS (async)) | JavaScriptCore JIT | **13613.6 ns** | **0.07 M** | 32.79x |
-| Node.js (VineJS (async)) | V8 JIT | **21791.5 ns** | **0.05 M** | 52.49x |
+| Rust (garde (in-memory struct)) | Native / Compiled | **545.1 ns** | **1.83 M** | 1.00x (Fastest) |
+| **Rust (jachai (typed struct))** | Native / Compiled | **579.8 ns** | **1.72 M** | 1.06x |
+| Rust (validator (in-memory struct)) | Native / Compiled | **828.5 ns** | **1.21 M** | 1.52x |
+| Rust (zod-rs) | Native / Compiled | **1008.0 ns** | **0.99 M** | 1.85x |
+| Node.js (Valibot (sync)) | V8 JIT | **1383.2 ns** | **0.72 M** | 2.54x |
+| Bun (Valibot (sync)) | JavaScriptCore JIT | **1584.9 ns** | **0.63 M** | 2.91x |
+| Go (go-playground/validator) | Go Runtime / Reflection | **2001.0 ns** | **0.50 M** | 3.67x |
+| **Rust (jachai (check / in-place))** | Native / Compiled | **2073.7 ns** | **0.48 M** | 3.80x |
+| **Rust (jachai)** | Native / Compiled | **2270.4 ns** | **0.44 M** | 4.17x |
+| Node.js (Zod (sync)) | V8 JIT | **2328.4 ns** | **0.43 M** | 4.27x |
+| Bun (Zod (sync)) | JavaScriptCore JIT | **2796.6 ns** | **0.36 M** | 5.13x |
+| Bun (VineJS (async)) | JavaScriptCore JIT | **15436.9 ns** | **0.06 M** | 28.32x |
+| Node.js (VineJS (async)) | V8 JIT | **22312.3 ns** | **0.04 M** | 40.93x |
 
 ### 5. Array of Objects Validation (Batch)
 
@@ -81,16 +89,18 @@ Benchmarked on canonical corpus across **Rust (jachai, garde, validator, zod-rs)
 
 | Ecosystem / Library | Runtime / Paradigm | Latency (ns/op) | Throughput (M ops/s) | Speedup vs Reference |
 | :--- | :--- | :--- | :--- | :--- |
-| Rust (garde (in-memory struct)) | Native / Compiled | **531.2 ns** | **1.88 M** | 1.00x (Fastest) |
-| Rust (validator (in-memory struct)) | Native / Compiled | **939.2 ns** | **1.06 M** | 1.77x |
-| Rust (zod-rs) | Native / Compiled | **2550.9 ns** | **0.39 M** | 4.80x |
-| Node.js (Valibot (sync)) | V8 JIT | **3534.0 ns** | **0.28 M** | 6.65x |
-| Bun (Zod (sync)) | JavaScriptCore JIT | **4392.9 ns** | **0.23 M** | 8.27x |
-| **Rust (jachai)** | Native / Compiled | **4395.1 ns** | **0.23 M** | 8.27x |
-| Node.js (Zod (sync)) | V8 JIT | **4821.9 ns** | **0.21 M** | 9.08x |
-| Bun (Valibot (sync)) | JavaScriptCore JIT | **6018.1 ns** | **0.17 M** | 11.33x |
-| Bun (VineJS (async)) | JavaScriptCore JIT | **18844.7 ns** | **0.05 M** | 35.48x |
-| Node.js (VineJS (async)) | V8 JIT | **22373.4 ns** | **0.04 M** | 42.12x |
+| Rust (garde (in-memory struct)) | Native / Compiled | **552.2 ns** | **1.81 M** | 1.00x (Fastest) |
+| **Rust (jachai (typed struct batch))** | Native / Compiled | **942.9 ns** | **1.06 M** | 1.71x |
+| Rust (validator (in-memory struct)) | Native / Compiled | **977.1 ns** | **1.02 M** | 1.77x |
+| Rust (zod-rs) | Native / Compiled | **2816.0 ns** | **0.36 M** | 5.10x |
+| Node.js (Valibot (sync)) | V8 JIT | **3154.6 ns** | **0.32 M** | 5.71x |
+| Bun (Zod (sync)) | JavaScriptCore JIT | **3494.5 ns** | **0.29 M** | 6.33x |
+| **Rust (jachai (check / in-place))** | Native / Compiled | **3841.1 ns** | **0.26 M** | 6.96x |
+| Bun (Valibot (sync)) | JavaScriptCore JIT | **3871.4 ns** | **0.26 M** | 7.01x |
+| Node.js (Zod (sync)) | V8 JIT | **4450.1 ns** | **0.22 M** | 8.06x |
+| **Rust (jachai)** | Native / Compiled | **4496.1 ns** | **0.22 M** | 8.14x |
+| Node.js (VineJS (async)) | V8 JIT | **21841.1 ns** | **0.05 M** | 39.55x |
+| Bun (VineJS (async)) | JavaScriptCore JIT | **29529.5 ns** | **0.03 M** | 53.47x |
 
 ### 6. Array of Objects Validation (Failure Path)
 
@@ -98,13 +108,17 @@ Benchmarked on canonical corpus across **Rust (jachai, garde, validator, zod-rs)
 
 | Ecosystem / Library | Runtime / Paradigm | Latency (ns/op) | Throughput (M ops/s) | Speedup vs Reference |
 | :--- | :--- | :--- | :--- | :--- |
-| Bun (Zod (sync)) | JavaScriptCore JIT | **3190.6 ns** | **0.31 M** | 1.00x (Fastest) |
-| Node.js (Valibot (sync)) | V8 JIT | **3390.8 ns** | **0.29 M** | 1.06x |
-| **Rust (jachai (array invalid))** | Native / Compiled | **4815.5 ns** | **0.21 M** | 1.51x |
-| Bun (Valibot (sync)) | JavaScriptCore JIT | **5397.8 ns** | **0.19 M** | 1.69x |
-| Node.js (Zod (sync)) | V8 JIT | **6440.0 ns** | **0.16 M** | 2.02x |
-| Node.js (VineJS (async)) | V8 JIT | **34044.4 ns** | **0.03 M** | 10.67x |
-| Bun (VineJS (async)) | JavaScriptCore JIT | **37187.3 ns** | **0.03 M** | 11.66x |
+| **Rust (jachai (typed struct batch))** | Native / Compiled | **384.1 ns** | **2.60 M** | 1.00x (Fastest) |
+| Rust (garde (in-memory struct)) | Native / Compiled | **879.4 ns** | **1.14 M** | 2.29x |
+| Rust (validator (in-memory struct)) | Native / Compiled | **1017.9 ns** | **0.98 M** | 2.65x |
+| Bun (Zod (sync)) | JavaScriptCore JIT | **3227.3 ns** | **0.31 M** | 8.40x |
+| Node.js (Valibot (sync)) | V8 JIT | **3371.2 ns** | **0.30 M** | 8.78x |
+| **Rust (jachai (check / in-place))** | Native / Compiled | **4658.7 ns** | **0.21 M** | 12.13x |
+| **Rust (jachai)** | Native / Compiled | **5054.8 ns** | **0.20 M** | 13.16x |
+| Node.js (Zod (sync)) | V8 JIT | **6263.5 ns** | **0.16 M** | 16.31x |
+| Bun (Valibot (sync)) | JavaScriptCore JIT | **6531.7 ns** | **0.15 M** | 17.00x |
+| Bun (VineJS (async)) | JavaScriptCore JIT | **21632.9 ns** | **0.05 M** | 56.32x |
+| Node.js (VineJS (async)) | V8 JIT | **31911.7 ns** | **0.03 M** | 83.08x |
 
 ### 7. Array Distinctness & Uniqueness
 
@@ -112,7 +126,7 @@ Benchmarked on canonical corpus across **Rust (jachai, garde, validator, zod-rs)
 
 | Ecosystem / Library | Runtime / Paradigm | Latency (ns/op) | Throughput (M ops/s) | Speedup vs Reference |
 | :--- | :--- | :--- | :--- | :--- |
-| **Rust (jachai (array unique))** | Native / Compiled | **3392.5 ns** | **0.29 M** | 1.00x (Fastest) |
+| **Rust (jachai (array unique))** | Native / Compiled | **3791.9 ns** | **0.26 M** | 1.00x (Fastest) |
 
 ### 8. Record / Map Key-Value Validation
 
@@ -120,11 +134,11 @@ Benchmarked on canonical corpus across **Rust (jachai, garde, validator, zod-rs)
 
 | Ecosystem / Library | Runtime / Paradigm | Latency (ns/op) | Throughput (M ops/s) | Speedup vs Reference |
 | :--- | :--- | :--- | :--- | :--- |
-| Node.js (Valibot (record)) | V8 JIT | **301.8 ns** | **3.31 M** | 1.00x (Fastest) |
-| Bun (Valibot (record)) | JavaScriptCore JIT | **677.6 ns** | **1.48 M** | 2.25x |
-| Node.js (Zod (record)) | V8 JIT | **1280.3 ns** | **0.78 M** | 4.24x |
-| **Rust (jachai)** | Native / Compiled | **1530.3 ns** | **0.65 M** | 5.07x |
-| Bun (Zod (record)) | JavaScriptCore JIT | **1937.6 ns** | **0.52 M** | 6.42x |
+| Bun (Valibot (record)) | JavaScriptCore JIT | **138.9 ns** | **7.20 M** | 1.00x (Fastest) |
+| Node.js (Valibot (record)) | V8 JIT | **250.7 ns** | **3.99 M** | 1.81x |
+| Bun (Zod (record)) | JavaScriptCore JIT | **828.4 ns** | **1.21 M** | 5.97x |
+| Node.js (Zod (record)) | V8 JIT | **1012.7 ns** | **0.99 M** | 7.29x |
+| **Rust (jachai)** | Native / Compiled | **1028.3 ns** | **0.97 M** | 7.40x |
 
 ### 9. Fixed-Length Heterogeneous Tuples
 
@@ -132,11 +146,11 @@ Benchmarked on canonical corpus across **Rust (jachai, garde, validator, zod-rs)
 
 | Ecosystem / Library | Runtime / Paradigm | Latency (ns/op) | Throughput (M ops/s) | Speedup vs Reference |
 | :--- | :--- | :--- | :--- | :--- |
-| Node.js (Valibot (tuple)) | V8 JIT | **120.0 ns** | **8.33 M** | 1.00x (Fastest) |
-| Node.js (Zod (tuple)) | V8 JIT | **194.6 ns** | **5.14 M** | 1.62x |
-| **Rust (jachai)** | Native / Compiled | **426.9 ns** | **2.34 M** | 3.56x |
-| Bun (Valibot (tuple)) | JavaScriptCore JIT | **518.7 ns** | **1.93 M** | 4.32x |
-| Bun (Zod (tuple)) | JavaScriptCore JIT | **1361.0 ns** | **0.73 M** | 11.34x |
+| Node.js (Valibot (tuple)) | V8 JIT | **111.2 ns** | **9.00 M** | 1.00x (Fastest) |
+| Bun (Valibot (tuple)) | JavaScriptCore JIT | **133.7 ns** | **7.48 M** | 1.20x |
+| Node.js (Zod (tuple)) | V8 JIT | **164.5 ns** | **6.08 M** | 1.48x |
+| **Rust (jachai)** | Native / Compiled | **264.8 ns** | **3.78 M** | 2.38x |
+| Bun (Zod (tuple)) | JavaScriptCore JIT | **403.1 ns** | **2.48 M** | 3.63x |
 
 ### 10. Enum / Variant Membership Validation
 
@@ -144,11 +158,11 @@ Benchmarked on canonical corpus across **Rust (jachai, garde, validator, zod-rs)
 
 | Ecosystem / Library | Runtime / Paradigm | Latency (ns/op) | Throughput (M ops/s) | Speedup vs Reference |
 | :--- | :--- | :--- | :--- | :--- |
-| Bun (Valibot (picklist)) | JavaScriptCore JIT | **31.4 ns** | **31.82 M** | 1.00x (Fastest) |
-| Node.js (Zod (enum)) | V8 JIT | **33.4 ns** | **29.93 M** | 1.06x |
-| **Rust (jachai)** | Native / Compiled | **38.9 ns** | **25.71 M** | 1.24x |
-| Node.js (Valibot (picklist)) | V8 JIT | **40.4 ns** | **24.75 M** | 1.29x |
-| Bun (Zod (enum)) | JavaScriptCore JIT | **102.2 ns** | **9.79 M** | 3.25x |
+| Node.js (Zod (enum)) | V8 JIT | **24.6 ns** | **40.67 M** | 1.00x (Fastest) |
+| Node.js (Valibot (picklist)) | V8 JIT | **31.9 ns** | **31.34 M** | 1.30x |
+| **Rust (jachai)** | Native / Compiled | **41.2 ns** | **24.27 M** | 1.68x |
+| Bun (Valibot (picklist)) | JavaScriptCore JIT | **103.2 ns** | **9.69 M** | 4.20x |
+| Bun (Zod (enum)) | JavaScriptCore JIT | **127.3 ns** | **7.86 M** | 5.18x |
 
 ### 11. Temporal & ISO 8601 / RFC 3339 Validation
 
@@ -156,13 +170,13 @@ Benchmarked on canonical corpus across **Rust (jachai, garde, validator, zod-rs)
 
 | Ecosystem / Library | Runtime / Paradigm | Latency (ns/op) | Throughput (M ops/s) | Speedup vs Reference |
 | :--- | :--- | :--- | :--- | :--- |
-| **Rust (jachai (rfc3339 time))** | Native / Compiled | **37.5 ns** | **26.66 M** | 1.00x (Fastest) |
-| **Rust (jachai (rfc3339 date))** | Native / Compiled | **41.7 ns** | **23.96 M** | 1.11x |
-| **Rust (jachai (rfc3339 datetime))** | Native / Compiled | **59.7 ns** | **16.76 M** | 1.59x |
-| Bun (Valibot (isoTimestamp)) | JavaScriptCore JIT | **80.4 ns** | **12.44 M** | 2.14x |
-| Node.js (Valibot (isoTimestamp)) | V8 JIT | **112.8 ns** | **8.86 M** | 3.01x |
-| Node.js (Zod (datetime)) | V8 JIT | **166.5 ns** | **6.01 M** | 4.44x |
-| Bun (Zod (datetime)) | JavaScriptCore JIT | **187.7 ns** | **5.33 M** | 5.01x |
+| **Rust (jachai (rfc3339 time))** | Native / Compiled | **72.6 ns** | **13.76 M** | 1.00x (Fastest) |
+| **Rust (jachai (rfc3339 date))** | Native / Compiled | **75.8 ns** | **13.20 M** | 1.04x |
+| **Rust (jachai (rfc3339 datetime))** | Native / Compiled | **101.5 ns** | **9.85 M** | 1.40x |
+| Node.js (Valibot (isoTimestamp)) | V8 JIT | **113.7 ns** | **8.80 M** | 1.56x |
+| Node.js (Zod (datetime)) | V8 JIT | **159.7 ns** | **6.26 M** | 2.20x |
+| Bun (Valibot (isoTimestamp)) | JavaScriptCore JIT | **286.4 ns** | **3.49 M** | 3.94x |
+| Bun (Zod (datetime)) | JavaScriptCore JIT | **646.6 ns** | **1.55 M** | 8.90x |
 
 ### 12. Network Protocol & Address Validation
 
@@ -170,24 +184,26 @@ Benchmarked on canonical corpus across **Rust (jachai, garde, validator, zod-rs)
 
 | Ecosystem / Library | Runtime / Paradigm | Latency (ns/op) | Throughput (M ops/s) | Speedup vs Reference |
 | :--- | :--- | :--- | :--- | :--- |
-| Rust (garde (ipv4)) | Native / Compiled | **26.1 ns** | **38.27 M** | 1.00x (Fastest) |
-| Rust (validator (ipv4)) | Native / Compiled | **46.9 ns** | **21.32 M** | 1.79x |
-| **Rust (jachai (ipv4))** | Native / Compiled | **67.5 ns** | **14.82 M** | 2.58x |
-| **Rust (jachai (mac_address))** | Native / Compiled | **91.6 ns** | **10.92 M** | 3.50x |
-| **Rust (jachai (cidr))** | Native / Compiled | **92.4 ns** | **10.83 M** | 3.53x |
-| Node.js (Valibot (ipv4)) | V8 JIT | **99.7 ns** | **10.03 M** | 3.82x |
-| Node.js (Zod (ipv4)) | V8 JIT | **141.5 ns** | **7.07 M** | 5.41x |
-| **Rust (jachai (domain))** | Native / Compiled | **159.4 ns** | **6.28 M** | 6.10x |
-| Node.js (Valibot (url)) | V8 JIT | **179.2 ns** | **5.58 M** | 6.86x |
-| Bun (Zod (ipv4)) | JavaScriptCore JIT | **180.2 ns** | **5.55 M** | 6.90x |
-| **Rust (jachai (ipv6))** | Native / Compiled | **216.4 ns** | **4.62 M** | 8.28x |
-| **Rust (jachai (url))** | Native / Compiled | **256.2 ns** | **3.90 M** | 9.80x |
-| Bun (Valibot (ipv4)) | JavaScriptCore JIT | **319.6 ns** | **3.13 M** | 12.23x |
-| Node.js (Zod (url)) | V8 JIT | **343.3 ns** | **2.91 M** | 13.14x |
-| Bun (Valibot (url)) | JavaScriptCore JIT | **450.0 ns** | **2.22 M** | 17.22x |
-| Rust (validator (url)) | Native / Compiled | **531.9 ns** | **1.88 M** | 20.35x |
-| Rust (garde (url)) | Native / Compiled | **705.3 ns** | **1.42 M** | 26.99x |
-| Bun (Zod (url)) | JavaScriptCore JIT | **798.6 ns** | **1.25 M** | 30.56x |
+| Rust (garde (ipv4)) | Native / Compiled | **49.6 ns** | **20.15 M** | 1.00x (Fastest) |
+| Rust (validator (ipv4)) | Native / Compiled | **88.9 ns** | **11.25 M** | 1.79x |
+| Node.js (Valibot (ipv4)) | V8 JIT | **107.4 ns** | **9.31 M** | 2.16x |
+| Node.js (Zod (ipv4)) | V8 JIT | **141.9 ns** | **7.05 M** | 2.86x |
+| **Rust (jachai (ipv4 / check_str))** | Native / Compiled | **159.6 ns** | **6.27 M** | 3.22x |
+| **Rust (jachai (url / check_str))** | Native / Compiled | **172.8 ns** | **5.79 M** | 3.48x |
+| **Rust (jachai (ipv4))** | Native / Compiled | **180.5 ns** | **5.54 M** | 3.64x |
+| Bun (Valibot (url)) | JavaScriptCore JIT | **183.1 ns** | **5.46 M** | 3.69x |
+| **Rust (jachai (mac_address))** | Native / Compiled | **184.4 ns** | **5.42 M** | 3.72x |
+| Node.js (Valibot (url)) | V8 JIT | **194.3 ns** | **5.15 M** | 3.92x |
+| **Rust (jachai (cidr))** | Native / Compiled | **195.5 ns** | **5.12 M** | 3.94x |
+| **Rust (jachai (url))** | Native / Compiled | **196.9 ns** | **5.08 M** | 3.97x |
+| **Rust (jachai (domain))** | Native / Compiled | **293.1 ns** | **3.41 M** | 5.91x |
+| **Rust (jachai (ipv6))** | Native / Compiled | **337.9 ns** | **2.96 M** | 6.81x |
+| Node.js (Zod (url)) | V8 JIT | **351.1 ns** | **2.85 M** | 7.07x |
+| Bun (Zod (ipv4)) | JavaScriptCore JIT | **590.2 ns** | **1.69 M** | 11.89x |
+| Bun (Zod (url)) | JavaScriptCore JIT | **710.2 ns** | **1.41 M** | 14.31x |
+| Bun (Valibot (ipv4)) | JavaScriptCore JIT | **770.7 ns** | **1.30 M** | 15.53x |
+| Rust (validator (url)) | Native / Compiled | **987.9 ns** | **1.01 M** | 19.91x |
+| Rust (garde (url)) | Native / Compiled | **1046.9 ns** | **0.96 M** | 21.10x |
 
 ### 13. Universal Identifiers
 
@@ -195,14 +211,14 @@ Benchmarked on canonical corpus across **Rust (jachai, garde, validator, zod-rs)
 
 | Ecosystem / Library | Runtime / Paradigm | Latency (ns/op) | Throughput (M ops/s) | Speedup vs Reference |
 | :--- | :--- | :--- | :--- | :--- |
-| **Rust (jachai (ulid))** | Native / Compiled | **79.6 ns** | **12.57 M** | 1.00x (Fastest) |
-| **Rust (jachai (slug))** | Native / Compiled | **106.7 ns** | **9.37 M** | 1.34x |
-| **Rust (jachai (semver))** | Native / Compiled | **125.5 ns** | **7.97 M** | 1.58x |
-| Node.js (Valibot (ulid)) | V8 JIT | **165.3 ns** | **6.05 M** | 2.08x |
-| **Rust (jachai (uuid))** | Native / Compiled | **170.7 ns** | **5.86 M** | 2.14x |
-| Node.js (Zod (ulid)) | V8 JIT | **204.7 ns** | **4.88 M** | 2.57x |
-| Bun (Valibot (ulid)) | JavaScriptCore JIT | **270.4 ns** | **3.70 M** | 3.40x |
-| Bun (Zod (ulid)) | JavaScriptCore JIT | **482.9 ns** | **2.07 M** | 6.07x |
+| Bun (Valibot (ulid)) | JavaScriptCore JIT | **110.5 ns** | **9.05 M** | 1.00x (Fastest) |
+| **Rust (jachai (ulid))** | Native / Compiled | **153.0 ns** | **6.54 M** | 1.38x |
+| Bun (Zod (ulid)) | JavaScriptCore JIT | **169.0 ns** | **5.92 M** | 1.53x |
+| Node.js (Valibot (ulid)) | V8 JIT | **175.6 ns** | **5.69 M** | 1.59x |
+| Node.js (Zod (ulid)) | V8 JIT | **204.9 ns** | **4.88 M** | 1.85x |
+| **Rust (jachai (slug))** | Native / Compiled | **206.8 ns** | **4.84 M** | 1.87x |
+| **Rust (jachai (uuid))** | Native / Compiled | **210.5 ns** | **4.75 M** | 1.90x |
+| **Rust (jachai (semver))** | Native / Compiled | **234.6 ns** | **4.26 M** | 2.12x |
 
 ### 14. Financial & Payment Validation
 
@@ -210,11 +226,12 @@ Benchmarked on canonical corpus across **Rust (jachai, garde, validator, zod-rs)
 
 | Ecosystem / Library | Runtime / Paradigm | Latency (ns/op) | Throughput (M ops/s) | Speedup vs Reference |
 | :--- | :--- | :--- | :--- | :--- |
-| **Rust (jachai (currency_code))** | Native / Compiled | **70.2 ns** | **14.24 M** | 1.00x (Fastest) |
-| **Rust (jachai (credit_card))** | Native / Compiled | **110.0 ns** | **9.09 M** | 1.57x |
-| Rust (garde (credit_card)) | Native / Compiled | **328.6 ns** | **3.04 M** | 4.68x |
-| Rust (validator (credit_card)) | Native / Compiled | **400.4 ns** | **2.50 M** | 5.70x |
-| **Rust (jachai (iban))** | Native / Compiled | **404.9 ns** | **2.47 M** | 5.77x |
+| **Rust (jachai (currency_code))** | Native / Compiled | **116.2 ns** | **8.60 M** | 1.00x (Fastest) |
+| **Rust (jachai (credit_card / check_str))** | Native / Compiled | **179.7 ns** | **5.56 M** | 1.55x |
+| **Rust (jachai (credit_card))** | Native / Compiled | **199.5 ns** | **5.01 M** | 1.72x |
+| Rust (garde (credit_card)) | Native / Compiled | **651.8 ns** | **1.53 M** | 5.61x |
+| Rust (validator (credit_card)) | Native / Compiled | **652.3 ns** | **1.53 M** | 5.61x |
+| **Rust (jachai (iban))** | Native / Compiled | **766.4 ns** | **1.30 M** | 6.59x |
 
 ### 15. Geographic & Visual Color Formats
 
@@ -222,11 +239,11 @@ Benchmarked on canonical corpus across **Rust (jachai, garde, validator, zod-rs)
 
 | Ecosystem / Library | Runtime / Paradigm | Latency (ns/op) | Throughput (M ops/s) | Speedup vs Reference |
 | :--- | :--- | :--- | :--- | :--- |
-| **Rust (jachai (country_code))** | Native / Compiled | **63.3 ns** | **15.80 M** | 1.00x (Fastest) |
-| **Rust (jachai (hex_color))** | Native / Compiled | **75.9 ns** | **13.18 M** | 1.20x |
-| **Rust (jachai (longitude))** | Native / Compiled | **96.8 ns** | **10.33 M** | 1.53x |
-| **Rust (jachai (latitude))** | Native / Compiled | **100.2 ns** | **9.98 M** | 1.58x |
-| **Rust (jachai (coordinates))** | Native / Compiled | **144.0 ns** | **6.94 M** | 2.28x |
+| **Rust (jachai (country_code))** | Native / Compiled | **165.9 ns** | **6.03 M** | 1.00x (Fastest) |
+| **Rust (jachai (latitude))** | Native / Compiled | **188.9 ns** | **5.29 M** | 1.14x |
+| **Rust (jachai (hex_color))** | Native / Compiled | **203.6 ns** | **4.91 M** | 1.23x |
+| **Rust (jachai (longitude))** | Native / Compiled | **240.3 ns** | **4.16 M** | 1.45x |
+| **Rust (jachai (coordinates))** | Native / Compiled | **357.0 ns** | **2.80 M** | 2.15x |
 
 ### 16. Cryptographic & Security Verification
 
@@ -234,15 +251,15 @@ Benchmarked on canonical corpus across **Rust (jachai, garde, validator, zod-rs)
 
 | Ecosystem / Library | Runtime / Paradigm | Latency (ns/op) | Throughput (M ops/s) | Speedup vs Reference |
 | :--- | :--- | :--- | :--- | :--- |
-| **Rust (jachai (base64))** | Native / Compiled | **87.2 ns** | **11.46 M** | 1.00x (Fastest) |
-| **Rust (jachai (sha256))** | Native / Compiled | **161.3 ns** | **6.20 M** | 1.85x |
-| Node.js (Valibot (base64)) | V8 JIT | **203.9 ns** | **4.91 M** | 2.34x |
-| Node.js (Zod (base64)) | V8 JIT | **282.6 ns** | **3.54 M** | 3.24x |
-| **Rust (jachai (jwt))** | Native / Compiled | **296.4 ns** | **3.37 M** | 3.40x |
-| Bun (Valibot (base64)) | JavaScriptCore JIT | **352.1 ns** | **2.84 M** | 4.04x |
-| Bun (Zod (base64)) | JavaScriptCore JIT | **761.9 ns** | **1.31 M** | 8.73x |
-| Node.js (Zod (jwt)) | V8 JIT | **957.8 ns** | **1.04 M** | 10.98x |
-| Bun (Zod (jwt)) | JavaScriptCore JIT | **1039.6 ns** | **0.96 M** | 11.92x |
+| Bun (Valibot (base64)) | JavaScriptCore JIT | **118.1 ns** | **8.47 M** | 1.00x (Fastest) |
+| Node.js (Valibot (base64)) | V8 JIT | **210.8 ns** | **4.74 M** | 1.79x |
+| **Rust (jachai (base64))** | Native / Compiled | **221.7 ns** | **4.51 M** | 1.88x |
+| Node.js (Zod (base64)) | V8 JIT | **265.9 ns** | **3.76 M** | 2.25x |
+| Bun (Zod (base64)) | JavaScriptCore JIT | **266.1 ns** | **3.76 M** | 2.25x |
+| **Rust (jachai (sha256))** | Native / Compiled | **464.5 ns** | **2.15 M** | 3.93x |
+| Bun (Zod (jwt)) | JavaScriptCore JIT | **636.0 ns** | **1.57 M** | 5.39x |
+| **Rust (jachai (jwt))** | Native / Compiled | **773.5 ns** | **1.29 M** | 6.55x |
+| Node.js (Zod (jwt)) | V8 JIT | **843.4 ns** | **1.19 M** | 7.14x |
 
 ### 17. Cross-Field & Conditional Validation
 
@@ -250,9 +267,9 @@ Benchmarked on canonical corpus across **Rust (jachai, garde, validator, zod-rs)
 
 | Ecosystem / Library | Runtime / Paradigm | Latency (ns/op) | Throughput (M ops/s) | Speedup vs Reference |
 | :--- | :--- | :--- | :--- | :--- |
-| **Rust (jachai (required_if cross-rule))** | Native / Compiled | **335.8 ns** | **2.98 M** | 1.00x (Fastest) |
-| **Rust (jachai (after_date cross-rule))** | Native / Compiled | **381.8 ns** | **2.62 M** | 1.14x |
-| **Rust (jachai (confirmed rule))** | Native / Compiled | **516.3 ns** | **1.94 M** | 1.54x |
+| **Rust (jachai (required_if cross-rule))** | Native / Compiled | **388.6 ns** | **2.57 M** | 1.00x (Fastest) |
+| **Rust (jachai (after_date cross-rule))** | Native / Compiled | **419.4 ns** | **2.38 M** | 1.08x |
+| **Rust (jachai (confirmed rule))** | Native / Compiled | **889.9 ns** | **1.12 M** | 2.29x |
 
 ### 18. Universal Multi-Source HTTP Request Envelopes
 
@@ -260,7 +277,7 @@ Benchmarked on canonical corpus across **Rust (jachai, garde, validator, zod-rs)
 
 | Ecosystem / Library | Runtime / Paradigm | Latency (ns/op) | Throughput (M ops/s) | Speedup vs Reference |
 | :--- | :--- | :--- | :--- | :--- |
-| **Rust (jachai (multi-source request envelope))** | Native / Compiled | **2857.6 ns** | **0.35 M** | 1.00x (Fastest) |
+| **Rust (jachai (multi-source request envelope))** | Native / Compiled | **3695.2 ns** | **0.27 M** | 1.00x (Fastest) |
 
 ### 19. Primitive String RFC 5322 Email Validation
 
@@ -269,16 +286,17 @@ Benchmarked on canonical corpus across **Rust (jachai, garde, validator, zod-rs)
 | Ecosystem / Library | Runtime / Paradigm | Latency (ns/op) | Throughput (M ops/s) | Speedup vs Reference |
 | :--- | :--- | :--- | :--- | :--- |
 | Go (go-playground/validator) | Go Runtime / Regex Cache | **27.9 ns** | **35.87 M** | 1.00x (Fastest) |
-| Rust (zod-rs) | Native / Compiled | **81.4 ns** | **12.28 M** | 2.92x |
-| Rust (garde (primitive)) | Native / Compiled | **94.9 ns** | **10.53 M** | 3.40x |
-| **Rust (jachai)** | Native / Compiled | **134.5 ns** | **7.43 M** | 4.83x |
-| Node.js (Valibot (sync)) | V8 JIT | **145.1 ns** | **6.89 M** | 5.20x |
-| Rust (validator (primitive)) | Native / Compiled | **160.3 ns** | **6.24 M** | 5.75x |
-| Bun (Valibot (sync)) | JavaScriptCore JIT | **202.4 ns** | **4.94 M** | 7.26x |
-| Node.js (Zod (sync)) | V8 JIT | **234.0 ns** | **4.27 M** | 8.39x |
-| Bun (Zod (sync)) | JavaScriptCore JIT | **330.4 ns** | **3.03 M** | 11.85x |
-| Node.js (VineJS (async)) | V8 JIT | **3328.0 ns** | **0.30 M** | 119.37x |
-| Bun (VineJS (async)) | JavaScriptCore JIT | **3808.0 ns** | **0.26 M** | 136.59x |
+| Rust (zod-rs) | Native / Compiled | **98.6 ns** | **10.14 M** | 3.54x |
+| Rust (garde (primitive)) | Native / Compiled | **107.7 ns** | **9.28 M** | 3.86x |
+| **Rust (jachai (check_str / zero-alloc))** | Native / Compiled | **110.5 ns** | **9.05 M** | 3.96x |
+| **Rust (jachai)** | Native / Compiled | **119.2 ns** | **8.39 M** | 4.28x |
+| Node.js (Valibot (sync)) | V8 JIT | **130.8 ns** | **7.64 M** | 4.69x |
+| Bun (Valibot (sync)) | JavaScriptCore JIT | **148.9 ns** | **6.72 M** | 5.34x |
+| Bun (Zod (sync)) | JavaScriptCore JIT | **180.4 ns** | **5.54 M** | 6.47x |
+| Rust (validator (primitive)) | Native / Compiled | **185.3 ns** | **5.40 M** | 6.65x |
+| Node.js (Zod (sync)) | V8 JIT | **197.5 ns** | **5.06 M** | 7.08x |
+| Node.js (VineJS (async)) | V8 JIT | **3152.0 ns** | **0.32 M** | 113.06x |
+| Bun (VineJS (async)) | JavaScriptCore JIT | **3845.1 ns** | **0.26 M** | 137.91x |
 
 ### 20. Primitive String Invalid Email Rejection
 
@@ -286,16 +304,17 @@ Benchmarked on canonical corpus across **Rust (jachai, garde, validator, zod-rs)
 
 | Ecosystem / Library | Runtime / Paradigm | Latency (ns/op) | Throughput (M ops/s) | Speedup vs Reference |
 | :--- | :--- | :--- | :--- | :--- |
-| Rust (zod-rs) | Native / Compiled | **103.2 ns** | **9.69 M** | 1.00x (Fastest) |
-| Bun (Valibot (sync)) | JavaScriptCore JIT | **210.1 ns** | **4.76 M** | 2.04x |
-| Node.js (Valibot (sync)) | V8 JIT | **292.2 ns** | **3.42 M** | 2.83x |
-| Rust (garde (primitive)) | Native / Compiled | **301.2 ns** | **3.32 M** | 2.92x |
-| Rust (validator (primitive)) | Native / Compiled | **354.0 ns** | **2.82 M** | 3.43x |
-| **Rust (jachai)** | Native / Compiled | **652.0 ns** | **1.53 M** | 6.32x |
-| Bun (Zod (sync)) | JavaScriptCore JIT | **1667.2 ns** | **0.60 M** | 16.16x |
-| Node.js (Zod (sync)) | V8 JIT | **1672.0 ns** | **0.60 M** | 16.21x |
-| Bun (VineJS (async)) | JavaScriptCore JIT | **5782.6 ns** | **0.17 M** | 56.05x |
-| Node.js (VineJS (async)) | V8 JIT | **15925.3 ns** | **0.06 M** | 154.38x |
+| Rust (zod-rs) | Native / Compiled | **115.5 ns** | **8.66 M** | 1.00x (Fastest) |
+| Node.js (Valibot (sync)) | V8 JIT | **255.5 ns** | **3.91 M** | 2.21x |
+| **Rust (jachai (check_str / zero-alloc))** | Native / Compiled | **283.6 ns** | **3.53 M** | 2.46x |
+| **Rust (jachai)** | Native / Compiled | **287.7 ns** | **3.48 M** | 2.49x |
+| Bun (Valibot (sync)) | JavaScriptCore JIT | **310.5 ns** | **3.22 M** | 2.69x |
+| Rust (garde (primitive)) | Native / Compiled | **335.5 ns** | **2.98 M** | 2.91x |
+| Rust (validator (primitive)) | Native / Compiled | **386.1 ns** | **2.59 M** | 3.34x |
+| Bun (Zod (sync)) | JavaScriptCore JIT | **864.5 ns** | **1.16 M** | 7.49x |
+| Node.js (Zod (sync)) | V8 JIT | **1335.1 ns** | **0.75 M** | 11.56x |
+| Bun (VineJS (async)) | JavaScriptCore JIT | **6535.7 ns** | **0.15 M** | 56.60x |
+| Node.js (VineJS (async)) | V8 JIT | **14859.4 ns** | **0.07 M** | 128.69x |
 
 ### 21. Primitive Integer Bounds Validation
 
@@ -303,12 +322,13 @@ Benchmarked on canonical corpus across **Rust (jachai, garde, validator, zod-rs)
 
 | Ecosystem / Library | Runtime / Paradigm | Latency (ns/op) | Throughput (M ops/s) | Speedup vs Reference |
 | :--- | :--- | :--- | :--- | :--- |
-| Rust (zod-rs) | Native / Compiled | **8.2 ns** | **121.64 M** | 1.00x (Fastest) |
-| **Rust (jachai)** | Native / Compiled | **40.1 ns** | **24.94 M** | 4.88x |
-| Bun (Valibot (sync)) | JavaScriptCore JIT | **84.2 ns** | **11.88 M** | 10.24x |
-| Node.js (Valibot (sync)) | V8 JIT | **148.9 ns** | **6.71 M** | 18.12x |
-| Bun (Zod (sync)) | JavaScriptCore JIT | **166.5 ns** | **6.01 M** | 20.25x |
-| Node.js (Zod (sync)) | V8 JIT | **342.2 ns** | **2.92 M** | 41.62x |
+| Rust (zod-rs) | Native / Compiled | **8.9 ns** | **112.86 M** | 1.00x (Fastest) |
+| **Rust (jachai (check_i64 / zero-alloc))** | Native / Compiled | **13.2 ns** | **76.03 M** | 1.48x |
+| **Rust (jachai)** | Native / Compiled | **45.5 ns** | **21.99 M** | 5.13x |
+| Node.js (Valibot (sync)) | V8 JIT | **78.7 ns** | **12.70 M** | 8.89x |
+| Bun (Valibot (sync)) | JavaScriptCore JIT | **86.4 ns** | **11.57 M** | 9.75x |
+| Bun (Zod (sync)) | JavaScriptCore JIT | **161.6 ns** | **6.19 M** | 18.24x |
+| Node.js (Zod (sync)) | V8 JIT | **244.3 ns** | **4.09 M** | 27.58x |
 
 ### 22. Primitive Float & Finite Number Validation
 
@@ -316,12 +336,13 @@ Benchmarked on canonical corpus across **Rust (jachai, garde, validator, zod-rs)
 
 | Ecosystem / Library | Runtime / Paradigm | Latency (ns/op) | Throughput (M ops/s) | Speedup vs Reference |
 | :--- | :--- | :--- | :--- | :--- |
-| Rust (zod-rs) | Native / Compiled | **8.0 ns** | **125.68 M** | 1.00x (Fastest) |
-| **Rust (jachai)** | Native / Compiled | **32.8 ns** | **30.49 M** | 4.12x |
-| Node.js (Valibot (sync)) | V8 JIT | **76.4 ns** | **13.10 M** | 9.60x |
-| Bun (Valibot (sync)) | JavaScriptCore JIT | **91.7 ns** | **10.90 M** | 11.53x |
-| Node.js (Zod (sync)) | V8 JIT | **169.6 ns** | **5.90 M** | 21.31x |
-| Bun (Zod (sync)) | JavaScriptCore JIT | **370.7 ns** | **2.70 M** | 46.59x |
+| Rust (zod-rs) | Native / Compiled | **7.6 ns** | **131.76 M** | 1.00x (Fastest) |
+| **Rust (jachai (check_f64 / zero-alloc))** | Native / Compiled | **11.9 ns** | **84.19 M** | 1.57x |
+| **Rust (jachai)** | Native / Compiled | **37.9 ns** | **26.41 M** | 4.99x |
+| Node.js (Valibot (sync)) | V8 JIT | **73.8 ns** | **13.55 M** | 9.73x |
+| Node.js (Zod (sync)) | V8 JIT | **170.9 ns** | **5.85 M** | 22.51x |
+| Bun (Valibot (sync)) | JavaScriptCore JIT | **200.0 ns** | **5.00 M** | 26.36x |
+| Bun (Zod (sync)) | JavaScriptCore JIT | **239.9 ns** | **4.17 M** | 31.61x |
 
 ### 23. Primitive Boolean / Acceptance Validation
 
@@ -329,11 +350,12 @@ Benchmarked on canonical corpus across **Rust (jachai, garde, validator, zod-rs)
 
 | Ecosystem / Library | Runtime / Paradigm | Latency (ns/op) | Throughput (M ops/s) | Speedup vs Reference |
 | :--- | :--- | :--- | :--- | :--- |
-| Node.js (Zod (sync)) | V8 JIT | **21.1 ns** | **47.42 M** | 1.00x (Fastest) |
-| **Rust (jachai (boolean accepted))** | Native / Compiled | **22.3 ns** | **44.84 M** | 1.06x |
-| Node.js (Valibot (sync)) | V8 JIT | **31.2 ns** | **32.03 M** | 1.48x |
-| Bun (Valibot (sync)) | JavaScriptCore JIT | **82.2 ns** | **12.17 M** | 3.90x |
-| Bun (Zod (sync)) | JavaScriptCore JIT | **124.3 ns** | **8.04 M** | 5.90x |
+| **Rust (jachai (check_bool / zero-alloc))** | Native / Compiled | **3.4 ns** | **289.89 M** | 1.00x (Fastest) |
+| Node.js (Zod (sync)) | V8 JIT | **18.0 ns** | **55.62 M** | 5.21x |
+| **Rust (jachai (boolean accepted))** | Native / Compiled | **23.3 ns** | **43.01 M** | 6.74x |
+| Node.js (Valibot (sync)) | V8 JIT | **29.7 ns** | **33.67 M** | 8.61x |
+| Bun (Valibot (sync)) | JavaScriptCore JIT | **80.3 ns** | **12.45 M** | 23.28x |
+| Bun (Zod (sync)) | JavaScriptCore JIT | **147.2 ns** | **6.79 M** | 42.68x |
 
 ### 24. String Affix & Substring Rules
 
@@ -341,11 +363,12 @@ Benchmarked on canonical corpus across **Rust (jachai, garde, validator, zod-rs)
 
 | Ecosystem / Library | Runtime / Paradigm | Latency (ns/op) | Throughput (M ops/s) | Speedup vs Reference |
 | :--- | :--- | :--- | :--- | :--- |
-| **Rust (jachai (prefix/suffix/contains))** | Native / Compiled | **90.4 ns** | **11.06 M** | 1.00x (Fastest) |
-| Node.js (Valibot (prefix/suffix/contains)) | V8 JIT | **315.9 ns** | **3.17 M** | 3.49x |
-| Bun (Valibot (prefix/suffix/contains)) | JavaScriptCore JIT | **403.7 ns** | **2.48 M** | 4.46x |
-| Node.js (Zod (prefix/suffix/contains)) | V8 JIT | **438.6 ns** | **2.28 M** | 4.85x |
-| Bun (Zod (prefix/suffix/contains)) | JavaScriptCore JIT | **729.4 ns** | **1.37 M** | 8.07x |
+| **Rust (jachai (check_str / zero-alloc))** | Native / Compiled | **90.2 ns** | **11.08 M** | 1.00x (Fastest) |
+| **Rust (jachai (prefix/suffix/contains))** | Native / Compiled | **101.0 ns** | **9.90 M** | 1.12x |
+| Node.js (Valibot (prefix/suffix/contains)) | V8 JIT | **163.2 ns** | **6.13 M** | 1.81x |
+| Node.js (Zod (prefix/suffix/contains)) | V8 JIT | **322.2 ns** | **3.10 M** | 3.57x |
+| Bun (Valibot (prefix/suffix/contains)) | JavaScriptCore JIT | **396.5 ns** | **2.52 M** | 4.39x |
+| Bun (Zod (prefix/suffix/contains)) | JavaScriptCore JIT | **855.8 ns** | **1.17 M** | 9.49x |
 
 ### 25. Uploaded File Metadata Validation
 
@@ -353,7 +376,7 @@ Benchmarked on canonical corpus across **Rust (jachai, garde, validator, zod-rs)
 
 | Ecosystem / Library | Runtime / Paradigm | Latency (ns/op) | Throughput (M ops/s) | Speedup vs Reference |
 | :--- | :--- | :--- | :--- | :--- |
-| **Rust (jachai (file size/mime/ext))** | Native / Compiled | **164.1 ns** | **6.09 M** | 1.00x (Fastest) |
+| **Rust (jachai (file size/mime/ext))** | Native / Compiled | **177.4 ns** | **5.64 M** | 1.00x (Fastest) |
 
 ### 26. Union / Variant Discrimination
 
@@ -361,11 +384,11 @@ Benchmarked on canonical corpus across **Rust (jachai, garde, validator, zod-rs)
 
 | Ecosystem / Library | Runtime / Paradigm | Latency (ns/op) | Throughput (M ops/s) | Speedup vs Reference |
 | :--- | :--- | :--- | :--- | :--- |
-| Node.js (Zod (sync)) | V8 JIT | **567.6 ns** | **1.76 M** | 1.00x (Fastest) |
-| **Rust (jachai)** | Native / Compiled | **1014.1 ns** | **0.99 M** | 1.79x |
-| Node.js (Valibot (sync)) | V8 JIT | **1164.9 ns** | **0.86 M** | 2.05x |
-| Bun (Zod (sync)) | JavaScriptCore JIT | **1213.2 ns** | **0.82 M** | 2.14x |
-| Bun (Valibot (sync)) | JavaScriptCore JIT | **1884.8 ns** | **0.53 M** | 3.32x |
+| Node.js (Zod (sync)) | V8 JIT | **470.4 ns** | **2.13 M** | 1.00x (Fastest) |
+| Bun (Valibot (sync)) | JavaScriptCore JIT | **658.0 ns** | **1.52 M** | 1.40x |
+| Bun (Zod (sync)) | JavaScriptCore JIT | **675.6 ns** | **1.48 M** | 1.44x |
+| **Rust (jachai)** | Native / Compiled | **817.4 ns** | **1.22 M** | 1.74x |
+| Node.js (Valibot (sync)) | V8 JIT | **1150.7 ns** | **0.87 M** | 2.45x |
 
 ### 27. End-to-End JSON Ingestion Pipeline
 
@@ -373,10 +396,11 @@ Benchmarked on canonical corpus across **Rust (jachai, garde, validator, zod-rs)
 
 | Ecosystem / Library | Runtime / Paradigm | Latency (ns/op) | Throughput (M ops/s) | Speedup vs Reference |
 | :--- | :--- | :--- | :--- | :--- |
-| Rust (garde (serde deserialize + validate)) | Native / Compiled | **330.3 ns** | **3.03 M** | 1.00x (Fastest) |
-| Rust (validator (serde deserialize + validate)) | Native / Compiled | **452.1 ns** | **2.21 M** | 1.37x |
-| Rust (zod-rs (parse json + validate)) | Native / Compiled | **965.4 ns** | **1.04 M** | 2.92x |
-| **Rust (jachai (parse json + validate))** | Native / Compiled | **1091.0 ns** | **0.92 M** | 3.30x |
+| Rust (garde (serde deserialize + validate)) | Native / Compiled | **378.0 ns** | **2.65 M** | 1.00x (Fastest) |
+| **Rust (jachai (serde deserialize + check))** | Native / Compiled | **418.0 ns** | **2.39 M** | 1.11x |
+| Rust (validator (serde deserialize + validate)) | Native / Compiled | **478.5 ns** | **2.09 M** | 1.27x |
+| Rust (zod-rs (parse json + validate)) | Native / Compiled | **1065.1 ns** | **0.94 M** | 2.82x |
+| **Rust (jachai (parse json + validate))** | Native / Compiled | **1103.5 ns** | **0.91 M** | 2.92x |
 
 ---
 

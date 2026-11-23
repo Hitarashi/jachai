@@ -1,7 +1,5 @@
 //! String schema builder, string format rules, and sanitization.
 
-#[cfg(feature = "regex")]
-use std::sync::LazyLock;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     str::FromStr,
@@ -23,21 +21,170 @@ use crate::{
     schema::Schema,
 };
 
-#[cfg(feature = "regex")]
-static EMAIL_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$")
-        .expect("Valid email regex")
-});
+const VALID_EMAIL_LOCAL: [bool; 256] = {
+    let mut table = [false; 256];
+    let mut i = 0;
+    while i < 256 {
+        let b = i as u8;
+        if (b >= b'a' && b <= b'z')
+            || (b >= b'A' && b <= b'Z')
+            || (b >= b'0' && b <= b'9')
+            || b == b'.'
+            || b == b'!'
+            || b == b'#'
+            || b == b'$'
+            || b == b'%'
+            || b == b'&'
+            || b == b'\''
+            || b == b'*'
+            || b == b'+'
+            || b == b'/'
+            || b == b'='
+            || b == b'?'
+            || b == b'^'
+            || b == b'_'
+            || b == b'`'
+            || b == b'{'
+            || b == b'|'
+            || b == b'}'
+            || b == b'~'
+            || b == b'-'
+        {
+            table[i] = true;
+        }
+        i += 1;
+    }
+    table
+};
 
-#[cfg(feature = "regex")]
-static UUID_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$")
-        .expect("Valid UUID regex")
-});
+const VALID_DOMAIN_CHAR: [bool; 256] = {
+    let mut table = [false; 256];
+    let mut i = 0;
+    while i < 256 {
+        let b = i as u8;
+        if (b >= b'a' && b <= b'z')
+            || (b >= b'A' && b <= b'Z')
+            || (b >= b'0' && b <= b'9')
+            || b == b'-'
+        {
+            table[i] = true;
+        }
+        i += 1;
+    }
+    table
+};
 
-#[cfg(feature = "regex")]
-static URL_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(?:https?|ftp)://[^\s/$.?#].[^\s]*$").expect("Valid URL regex"));
+#[inline]
+pub(crate) fn is_valid_email_fast(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    let len = bytes.len();
+    if !(3..=254).contains(&len) {
+        return false;
+    }
+
+    let Some(at_pos) = bytes.iter().position(|&b| b == b'@') else {
+        return false;
+    };
+
+    if at_pos == 0 || at_pos > 64 || at_pos >= len - 2 {
+        return false;
+    }
+
+    let local = &bytes[..at_pos];
+    let domain = &bytes[at_pos + 1..];
+
+    if domain.len() > 253 {
+        return false;
+    }
+
+    for &b in local {
+        if !VALID_EMAIL_LOCAL[b as usize] {
+            return false;
+        }
+    }
+
+    let mut has_dot = false;
+    let mut label_len = 0;
+    let mut last_byte = 0u8;
+
+    for &b in domain {
+        if b == b'.' {
+            if label_len == 0 || label_len > 63 || !last_byte.is_ascii_alphanumeric() {
+                return false;
+            }
+            has_dot = true;
+            label_len = 0;
+        } else {
+            if label_len == 0 {
+                if !b.is_ascii_alphanumeric() {
+                    return false;
+                }
+            } else if !VALID_DOMAIN_CHAR[b as usize] {
+                return false;
+            }
+            label_len += 1;
+            last_byte = b;
+        }
+    }
+
+    has_dot && label_len > 0 && label_len <= 63 && last_byte.is_ascii_alphanumeric()
+}
+
+#[inline]
+pub(crate) fn is_valid_uuid_fast(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    if bytes.len() != 36 {
+        return false;
+    }
+    if bytes[8] != b'-' || bytes[13] != b'-' || bytes[18] != b'-' || bytes[23] != b'-' {
+        return false;
+    }
+    if !matches!(bytes[14], b'1'..=b'8') {
+        return false;
+    }
+    if !matches!(bytes[19], b'8' | b'9' | b'a' | b'b' | b'A' | b'B') {
+        return false;
+    }
+    for (i, &b) in bytes.iter().enumerate() {
+        if i == 8 || i == 13 || i == 18 || i == 23 || i == 14 || i == 19 {
+            continue;
+        }
+        if !b.is_ascii_hexdigit() {
+            return false;
+        }
+    }
+    true
+}
+
+#[inline]
+pub(crate) fn is_valid_url_fast(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    let rest = if bytes.starts_with(b"https://") {
+        &bytes[8..]
+    } else if bytes.starts_with(b"http://") {
+        &bytes[7..]
+    } else if bytes.starts_with(b"ftp://") {
+        &bytes[6..]
+    } else {
+        return false;
+    };
+
+    if rest.len() < 2 {
+        return false;
+    }
+
+    let first = rest[0];
+    if first.is_ascii_whitespace() || matches!(first, b'/' | b'$' | b'.' | b'?' | b'#') {
+        return false;
+    }
+
+    for &b in &rest[1..] {
+        if b.is_ascii_whitespace() {
+            return false;
+        }
+    }
+    true
+}
 
 #[derive(Clone)]
 enum StringPredicate {
@@ -1002,7 +1149,11 @@ impl StringSchema {
 
         match predicate {
             StringPredicate::MinLen(min) => {
-                let char_count = value.chars().count();
+                let char_count = if value.is_ascii() {
+                    value.len()
+                } else {
+                    value.chars().count()
+                };
                 if char_count < *min {
                     let mut params = RuleParams::new();
                     params.insert("min", min.to_string());
@@ -1013,7 +1164,11 @@ impl StringSchema {
                 }
             }
             StringPredicate::MaxLen(max) => {
-                let char_count = value.chars().count();
+                let char_count = if value.is_ascii() {
+                    value.len()
+                } else {
+                    value.chars().count()
+                };
                 if char_count > *max {
                     let mut params = RuleParams::new();
                     params.insert("max", max.to_string());
@@ -1024,7 +1179,11 @@ impl StringSchema {
                 }
             }
             StringPredicate::ExactLen(expected) => {
-                let char_count = value.chars().count();
+                let char_count = if value.is_ascii() {
+                    value.len()
+                } else {
+                    value.chars().count()
+                };
                 if char_count != *expected {
                     let mut params = RuleParams::new();
                     params.insert("length", expected.to_string());
@@ -1035,10 +1194,7 @@ impl StringSchema {
                 }
             }
             StringPredicate::Email => {
-                #[cfg(feature = "regex")]
-                let is_valid = EMAIL_REGEX.is_match(value);
-                #[cfg(not(feature = "regex"))]
-                let is_valid = is_valid_email_simple(value);
+                let is_valid = is_valid_email_fast(value);
 
                 if !is_valid {
                     Some(rule_context.create_issue("email", RuleParams::new(), inline))
@@ -1047,10 +1203,7 @@ impl StringSchema {
                 }
             }
             StringPredicate::Url => {
-                #[cfg(feature = "regex")]
-                let is_valid = URL_REGEX.is_match(value);
-                #[cfg(not(feature = "regex"))]
-                let is_valid = is_valid_url_simple(value);
+                let is_valid = is_valid_url_fast(value);
 
                 if !is_valid {
                     Some(rule_context.create_issue("url", RuleParams::new(), inline))
@@ -1059,10 +1212,7 @@ impl StringSchema {
                 }
             }
             StringPredicate::Uuid => {
-                #[cfg(feature = "regex")]
-                let is_valid = UUID_REGEX.is_match(value);
-                #[cfg(not(feature = "regex"))]
-                let is_valid = is_valid_uuid_simple(value);
+                let is_valid = is_valid_uuid_fast(value);
 
                 if !is_valid {
                     Some(rule_context.create_issue("uuid", RuleParams::new(), inline))
@@ -1668,6 +1818,239 @@ impl StringSchema {
             }
         }
     }
+
+    #[inline]
+    fn matches_predicate(&self, predicate: &StringPredicate, value: &str) -> bool {
+        match predicate {
+            StringPredicate::MinLen(expected) => {
+                let bytes_len = value.len();
+                if bytes_len < *expected {
+                    false
+                } else if bytes_len >= expected.saturating_mul(4) {
+                    true
+                } else {
+                    value.chars().take(*expected).count() == *expected
+                }
+            }
+            StringPredicate::MaxLen(expected) => {
+                let bytes_len = value.len();
+                if bytes_len <= *expected {
+                    true
+                } else if bytes_len > expected.saturating_mul(4) {
+                    false
+                } else {
+                    value.chars().take(expected + 1).count() <= *expected
+                }
+            }
+            StringPredicate::ExactLen(expected) => {
+                let bytes_len = value.len();
+                if bytes_len < *expected || bytes_len > expected.saturating_mul(4) {
+                    false
+                } else {
+                    value.chars().take(expected + 1).count() == *expected
+                }
+            }
+            StringPredicate::Email => is_valid_email_fast(value),
+            StringPredicate::Url => is_valid_url_fast(value),
+            StringPredicate::Uuid => is_valid_uuid_fast(value),
+            StringPredicate::Ip => IpAddr::from_str(value).is_ok(),
+            StringPredicate::Ipv4 => Ipv4Addr::from_str(value).is_ok(),
+            StringPredicate::Ipv6 => Ipv6Addr::from_str(value).is_ok(),
+            StringPredicate::Date => crate::schema::date::is_valid_rfc3339_date(value),
+            StringPredicate::Time => crate::schema::date::is_valid_rfc3339_time(value),
+            StringPredicate::DateTime => crate::schema::date::is_valid_rfc3339_datetime(value),
+            StringPredicate::CreditCard => is_valid_credit_card(value),
+            StringPredicate::Ulid => is_valid_ulid(value),
+            StringPredicate::HexColor => is_valid_hex_color(value),
+            StringPredicate::Slug => is_valid_slug(value),
+            StringPredicate::SemVer => is_valid_semver(value),
+            StringPredicate::Base64 => is_valid_base64(value),
+            StringPredicate::StartsWith(prefix) => value.starts_with(prefix),
+            StringPredicate::EndsWith(suffix) => value.ends_with(suffix),
+            StringPredicate::Contains(sub) => value.contains(sub),
+            StringPredicate::Alpha => !value.is_empty() && value.chars().all(char::is_alphabetic),
+            StringPredicate::Alphanumeric => {
+                !value.is_empty() && value.chars().all(char::is_alphanumeric)
+            }
+            StringPredicate::Ascii => value.is_ascii(),
+            _ => {
+                let context = ValidationContext::new();
+                let rule_ctx = RuleContext::new(
+                    "",
+                    &context,
+                    None,
+                    crate::messages::default_messages_provider(),
+                );
+                self.evaluate_predicate(predicate, value, &rule_ctx)
+                    .is_none()
+            }
+        }
+    }
+
+    #[inline]
+    fn has_transform(&self) -> bool {
+        self.to_lower
+            || self.to_upper
+            || self.normalize_email
+            || self.escape_html
+            || self.should_trim
+            || self.trim_start
+            || self.trim_end
+    }
+
+    /// Checks that a string slice conforms to all validation rules without requiring `Value` wrappers or heap allocations.
+    pub fn check_str(&self, input: &str) -> Result<(), ValidationError> {
+        if !self.has_transform()
+            && (!self.empty_as_null || !input.is_empty())
+            && self
+                .predicates
+                .iter()
+                .all(|predicate| self.matches_predicate(predicate, input))
+        {
+            return Ok(());
+        }
+
+        let context = ValidationContext::new();
+        let rule_ctx = RuleContext::new(
+            "",
+            &context,
+            None,
+            crate::messages::default_messages_provider(),
+        );
+
+        let has_transform = self.has_transform();
+        let processed: std::borrow::Cow<'_, str> = if has_transform {
+            let mut text = input.to_string();
+            if self.should_trim {
+                text = trim_whitespace(&text).to_string();
+            } else {
+                if self.trim_start {
+                    text = text.trim_start().to_string();
+                }
+                if self.trim_end {
+                    text = text.trim_end().to_string();
+                }
+            }
+
+            if self.to_lower {
+                text = text.to_lowercase();
+            } else if self.to_upper {
+                text = text.to_uppercase();
+            }
+
+            if self.normalize_email {
+                text = normalize_email_str(&text);
+            }
+
+            if self.escape_html {
+                text = escape_html_str(&text);
+            }
+            std::borrow::Cow::Owned(text)
+        } else {
+            std::borrow::Cow::Borrowed(input)
+        };
+
+        if self.empty_as_null && processed.is_empty() {
+            let issue = rule_ctx.create_issue(
+                "required",
+                RuleParams::new(),
+                self.inline_message.as_deref(),
+            );
+            return Err(ValidationError::single(
+                issue.field,
+                issue.rule,
+                issue.message,
+            ));
+        }
+
+        let mut errors = ValidationError::new();
+        for predicate in &self.predicates {
+            if let Some(issue) = self.evaluate_predicate(predicate, &processed, &rule_ctx) {
+                errors.push(issue);
+                if self.bail_on_fail {
+                    break;
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// Validates and sanitizes a string slice, returning the processed result.
+    pub fn validate_str(&self, input: &str) -> Result<String, ValidationError> {
+        let context = ValidationContext::new();
+        let rule_ctx = RuleContext::new(
+            "",
+            &context,
+            None,
+            crate::messages::default_messages_provider(),
+        );
+
+        let has_transform = self.has_transform();
+        let processed: std::borrow::Cow<'_, str> = if has_transform {
+            let mut text = input.to_string();
+            if self.should_trim {
+                text = trim_whitespace(&text).to_string();
+            } else {
+                if self.trim_start {
+                    text = text.trim_start().to_string();
+                }
+                if self.trim_end {
+                    text = text.trim_end().to_string();
+                }
+            }
+
+            if self.to_lower {
+                text = text.to_lowercase();
+            } else if self.to_upper {
+                text = text.to_uppercase();
+            }
+
+            if self.normalize_email {
+                text = normalize_email_str(&text);
+            }
+
+            if self.escape_html {
+                text = escape_html_str(&text);
+            }
+            std::borrow::Cow::Owned(text)
+        } else {
+            std::borrow::Cow::Borrowed(input)
+        };
+
+        if self.empty_as_null && processed.is_empty() {
+            let issue = rule_ctx.create_issue(
+                "required",
+                RuleParams::new(),
+                self.inline_message.as_deref(),
+            );
+            return Err(ValidationError::single(
+                issue.field,
+                issue.rule,
+                issue.message,
+            ));
+        }
+
+        let mut errors = ValidationError::new();
+        for predicate in &self.predicates {
+            if let Some(issue) = self.evaluate_predicate(predicate, &processed, &rule_ctx) {
+                errors.push(issue);
+                if self.bail_on_fail {
+                    break;
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(processed.into_owned())
+        } else {
+            Err(errors)
+        }
+    }
 }
 
 impl Schema<String> for StringSchema {
@@ -1681,8 +2064,8 @@ impl Schema<String> for StringSchema {
     ) -> Result<String, ValidationError> {
         let rule_ctx = RuleContext::new(path, context, parent_data, messages);
 
-        let initial_string = match value {
-            Value::String(s) => s.clone(),
+        let s = match value {
+            Value::String(s) => s.as_str(),
             Value::Null => {
                 let issue = rule_ctx.create_issue(
                     "required",
@@ -1709,31 +2092,37 @@ impl Schema<String> for StringSchema {
             }
         };
 
-        let mut processed = initial_string;
-        if self.should_trim {
-            processed = trim_whitespace(&processed).to_string();
+        let has_transform = self.has_transform();
+        let processed: std::borrow::Cow<'_, str> = if has_transform {
+            let mut text = s.to_string();
+            if self.should_trim {
+                text = trim_whitespace(&text).to_string();
+            } else {
+                if self.trim_start {
+                    text = text.trim_start().to_string();
+                }
+                if self.trim_end {
+                    text = text.trim_end().to_string();
+                }
+            }
+
+            if self.to_lower {
+                text = text.to_lowercase();
+            } else if self.to_upper {
+                text = text.to_uppercase();
+            }
+
+            if self.normalize_email {
+                text = normalize_email_str(&text);
+            }
+
+            if self.escape_html {
+                text = escape_html_str(&text);
+            }
+            std::borrow::Cow::Owned(text)
         } else {
-            if self.trim_start {
-                processed = processed.trim_start().to_string();
-            }
-            if self.trim_end {
-                processed = processed.trim_end().to_string();
-            }
-        }
-
-        if self.to_lower {
-            processed = processed.to_lowercase();
-        } else if self.to_upper {
-            processed = processed.to_uppercase();
-        }
-
-        if self.normalize_email {
-            processed = normalize_email_str(&processed);
-        }
-
-        if self.escape_html {
-            processed = escape_html_str(&processed);
-        }
+            std::borrow::Cow::Borrowed(s)
+        };
 
         if self.empty_as_null && processed.is_empty() {
             let issue = rule_ctx.create_issue(
@@ -1759,7 +2148,120 @@ impl Schema<String> for StringSchema {
         }
 
         if errors.is_empty() {
-            Ok(processed)
+            Ok(processed.into_owned())
+        } else {
+            Err(errors)
+        }
+    }
+
+    fn check_path(
+        &self,
+        value: &Value,
+        path: &str,
+        context: &ValidationContext,
+        parent_data: Option<&Value>,
+        messages: &dyn MessagesProvider,
+    ) -> Result<(), ValidationError> {
+        let s = match value {
+            Value::String(s) => s.as_str(),
+            Value::Null => {
+                let rule_ctx = RuleContext::new(path, context, parent_data, messages);
+                let issue = rule_ctx.create_issue(
+                    "required",
+                    RuleParams::new(),
+                    self.inline_message.as_deref(),
+                );
+                return Err(ValidationError::single(
+                    issue.field,
+                    issue.rule,
+                    issue.message,
+                ));
+            }
+            _ => {
+                let rule_ctx = RuleContext::new(path, context, parent_data, messages);
+                let issue = rule_ctx.create_issue(
+                    "string",
+                    RuleParams::new(),
+                    self.inline_message.as_deref(),
+                );
+                return Err(ValidationError::single(
+                    issue.field,
+                    issue.rule,
+                    issue.message,
+                ));
+            }
+        };
+
+        if !self.has_transform()
+            && (!self.empty_as_null || !s.is_empty())
+            && self
+                .predicates
+                .iter()
+                .all(|predicate| self.matches_predicate(predicate, s))
+        {
+            return Ok(());
+        }
+
+        let has_transform = self.has_transform();
+
+        let rule_ctx = RuleContext::new(path, context, parent_data, messages);
+
+        let processed: std::borrow::Cow<'_, str> = if has_transform {
+            let mut text = s.to_string();
+            if self.should_trim {
+                text = trim_whitespace(&text).to_string();
+            } else {
+                if self.trim_start {
+                    text = text.trim_start().to_string();
+                }
+                if self.trim_end {
+                    text = text.trim_end().to_string();
+                }
+            }
+
+            if self.to_lower {
+                text = text.to_lowercase();
+            } else if self.to_upper {
+                text = text.to_uppercase();
+            }
+
+            if self.normalize_email {
+                text = normalize_email_str(&text);
+            }
+
+            if self.escape_html {
+                text = escape_html_str(&text);
+            }
+            std::borrow::Cow::Owned(text)
+        } else {
+            std::borrow::Cow::Borrowed(s)
+        };
+
+        if self.empty_as_null && processed.is_empty() {
+            let issue = rule_ctx.create_issue(
+                "required",
+                RuleParams::new(),
+                self.inline_message.as_deref(),
+            );
+            return Err(ValidationError::single(
+                issue.field,
+                issue.rule,
+                issue.message,
+            ));
+        }
+
+        let mut errors = ValidationError::new();
+        for predicate in &self.predicates {
+            if let Some(issue) = self.evaluate_predicate(predicate, &processed, &rule_ctx) {
+                errors.push(issue);
+                if self.bail_on_fail {
+                    break;
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
         } else {
             Err(errors)
         }
@@ -3014,43 +3516,4 @@ fn is_valid_imei(s: &str) -> bool {
         sum += d;
     }
     sum % 10 == 0
-}
-
-#[cfg(not(feature = "regex"))]
-fn is_valid_email_simple(s: &str) -> bool {
-    if let Some((user, domain)) = s.split_once('@') {
-        !user.is_empty()
-            && !domain.is_empty()
-            && domain.contains('.')
-            && !s.bytes().any(|b| b.is_ascii_whitespace())
-    } else {
-        false
-    }
-}
-
-#[cfg(not(feature = "regex"))]
-fn is_valid_url_simple(s: &str) -> bool {
-    (s.starts_with("http://") || s.starts_with("https://") || s.starts_with("ftp://"))
-        && s.len() > 7
-        && !s.bytes().any(|b| b.is_ascii_whitespace())
-}
-
-#[cfg(not(feature = "regex"))]
-fn is_valid_uuid_simple(s: &str) -> bool {
-    let bytes = s.as_bytes();
-    if bytes.len() != 36 {
-        return false;
-    }
-    if bytes[8] != b'-' || bytes[13] != b'-' || bytes[18] != b'-' || bytes[23] != b'-' {
-        return false;
-    }
-    for (i, &b) in bytes.iter().enumerate() {
-        if i == 8 || i == 13 || i == 18 || i == 23 {
-            continue;
-        }
-        if !b.is_ascii_hexdigit() {
-            return false;
-        }
-    }
-    true
 }

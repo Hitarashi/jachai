@@ -64,6 +64,31 @@ pub trait Schema<T>: Send + Sync + 'static {
         )
     }
 
+    /// Checks whether untrusted input conforms to this schema without allocating decoded outputs where supported.
+    fn check(&self, value: &Value) -> Result<(), ValidationError> {
+        let context = ValidationContext::new();
+        self.check_path(
+            value,
+            "",
+            &context,
+            None,
+            crate::messages::default_messages_provider(),
+        )
+    }
+
+    /// Internal evaluation method checking conformity without allocating decoded outputs.
+    fn check_path(
+        &self,
+        value: &Value,
+        path: &str,
+        context: &ValidationContext,
+        parent_data: Option<&Value>,
+        messages: &dyn MessagesProvider,
+    ) -> Result<(), ValidationError> {
+        self.validate_path(value, path, context, parent_data, messages)
+            .map(|_| ())
+    }
+
     /// Internal evaluation method tracking the hierarchical path, parent data, and message provider.
     fn validate_path(
         &self,

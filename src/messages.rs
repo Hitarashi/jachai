@@ -481,24 +481,35 @@ impl MessagesProvider for SimpleMessagesProvider {
         params: &RuleParams,
         inline_override: Option<&str>,
     ) -> String {
-        let field_rule_key = format!("{field}.{rule}");
-        let field_wildcard_key = format!("{field}.*");
-
         let raw_template = inline_override
             .or_else(|| {
-                self.field_overrides
-                    .get(&field_rule_key)
-                    .map(String::as_str)
+                if self.field_overrides.is_empty() || field.is_empty() {
+                    None
+                } else {
+                    let field_rule_key = format!("{field}.{rule}");
+                    self.field_overrides
+                        .get(&field_rule_key)
+                        .map(String::as_str)
+                }
             })
             .or_else(|| {
-                self.field_overrides
-                    .get(&field_wildcard_key)
-                    .map(String::as_str)
+                if self.field_overrides.is_empty() || field.is_empty() {
+                    None
+                } else {
+                    let field_wildcard_key = format!("{field}.*");
+                    self.field_overrides
+                        .get(&field_wildcard_key)
+                        .map(String::as_str)
+                }
             })
             .or_else(|| self.rule_defaults.get(rule).map(String::as_str))
             .unwrap_or("The :field field failed validation (:rule).");
 
-        let custom_label = self.field_labels.get(field).map(String::as_str);
+        let custom_label = if self.field_labels.is_empty() {
+            None
+        } else {
+            self.field_labels.get(field).map(String::as_str)
+        };
         interpolate_placeholders_with_label(raw_template, field, custom_label, rule, params)
     }
 }
@@ -521,25 +532,58 @@ pub fn interpolate_placeholders_with_label(
     rule: &str,
     params: &RuleParams,
 ) -> String {
-    let mut rendered = template.to_string();
+    if !template.contains(':') {
+        return template.to_string();
+    }
 
     let humanized;
     let display_field = match label {
         Some(custom_label) => custom_label,
         None => {
-            humanized = humanize_field_name(field);
-            humanized.as_str()
+            if field.is_empty() {
+                "value"
+            } else if !field.contains('.') && !field.contains('[') && !field.contains('_') {
+                field
+            } else {
+                humanized = humanize_field_name(field);
+                humanized.as_str()
+            }
         }
     };
-    rendered = rendered.replace(":field", display_field);
-    rendered = rendered.replace(":label", display_field);
-    rendered = rendered.replace(":rule", rule);
 
-    for (key, val) in params.iter() {
-        let placeholder = format!(":{key}");
-        rendered = rendered.replace(&placeholder, val);
+    let mut rendered = String::with_capacity(template.len() + 32);
+    let mut remaining = template;
+
+    while let Some(colon_idx) = remaining.find(':') {
+        rendered.push_str(&remaining[..colon_idx]);
+        let after_colon = &remaining[colon_idx + 1..];
+        let word_len = after_colon
+            .bytes()
+            .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_')
+            .count();
+
+        if word_len > 0 {
+            let key = &after_colon[..word_len];
+            match key {
+                "field" | "label" => rendered.push_str(display_field),
+                "rule" => rendered.push_str(rule),
+                _ => {
+                    if let Some(val) = params.get(key) {
+                        rendered.push_str(val);
+                    } else {
+                        rendered.push(':');
+                        rendered.push_str(key);
+                    }
+                }
+            }
+            remaining = &after_colon[word_len..];
+        } else {
+            rendered.push(':');
+            remaining = after_colon;
+        }
     }
 
+    rendered.push_str(remaining);
     rendered
 }
 

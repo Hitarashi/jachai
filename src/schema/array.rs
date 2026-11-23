@@ -148,6 +148,24 @@ where
     }
 }
 
+impl<S, T> ArraySchema<S, T>
+where
+    S: Schema<T>,
+    T: Send + Sync + 'static,
+{
+    /// Checks that a JSON Value matches the array schema without allocating the returned Vec.
+    pub fn check(&self, value: &Value) -> Result<(), ValidationError> {
+        let context = ValidationContext::new();
+        self.check_path(
+            value,
+            "",
+            &context,
+            None,
+            crate::messages::default_messages_provider(),
+        )
+    }
+}
+
 impl<S, T> Schema<Vec<T>> for ArraySchema<S, T>
 where
     S: Schema<T>,
@@ -325,6 +343,176 @@ where
 
         if errors.is_empty() {
             Ok(validated_items)
+        } else {
+            Err(errors)
+        }
+    }
+
+    fn check_path(
+        &self,
+        value: &Value,
+        path: &str,
+        context: &ValidationContext,
+        parent_data: Option<&Value>,
+        messages: &dyn MessagesProvider,
+    ) -> Result<(), ValidationError> {
+        let rule_ctx = RuleContext::new(path, context, parent_data, messages);
+        let inline = self.inline_message.as_deref();
+
+        let items = match value {
+            Value::Array(arr) => arr,
+            Value::Null => {
+                let issue = rule_ctx.create_issue("required", RuleParams::new(), inline);
+                return Err(ValidationError::single(
+                    issue.field,
+                    issue.rule,
+                    issue.message,
+                ));
+            }
+            _ => {
+                let issue = rule_ctx.create_issue("required", RuleParams::new(), inline);
+                return Err(ValidationError::single(
+                    issue.field,
+                    issue.rule,
+                    issue.message,
+                ));
+            }
+        };
+
+        let mut errors = ValidationError::new();
+
+        if self.not_empty && items.is_empty() {
+            errors.push(rule_ctx.create_issue("not_empty", RuleParams::new(), inline));
+            if self.bail_on_fail {
+                return Err(errors);
+            }
+        }
+
+        if let Some(min) = self.min_items
+            && items.len() < min
+        {
+            let mut params = RuleParams::new();
+            params.insert("min", min.to_string());
+            params.insert("actual", items.len().to_string());
+            errors.push(rule_ctx.create_issue("min_items", params, inline));
+            if self.bail_on_fail {
+                return Err(errors);
+            }
+        }
+
+        if let Some(max) = self.max_items
+            && items.len() > max
+        {
+            let mut params = RuleParams::new();
+            params.insert("max", max.to_string());
+            params.insert("actual", items.len().to_string());
+            errors.push(rule_ctx.create_issue("max_items", params, inline));
+            if self.bail_on_fail {
+                return Err(errors);
+            }
+        }
+
+        if let Some(exact) = self.exact_items
+            && items.len() != exact
+        {
+            let mut params = RuleParams::new();
+            params.insert("length", exact.to_string());
+            params.insert("actual", items.len().to_string());
+            errors.push(rule_ctx.create_issue("exact_items", params, inline));
+            if self.bail_on_fail {
+                return Err(errors);
+            }
+        }
+
+        if self.distinct {
+            let mut seen = HashSet::new();
+            for item in items {
+                if !seen.insert(item) {
+                    errors.push(rule_ctx.create_issue("distinct", RuleParams::new(), inline));
+                    if self.bail_on_fail {
+                        return Err(errors);
+                    }
+                    break;
+                }
+            }
+        }
+
+        if let Some(ref allowed) = self.subset_allowed {
+            for item in items {
+                let item_str = match item {
+                    Value::String(s) => Some(s.as_str()),
+                    _ => None,
+                };
+                let is_allowed = item_str.is_some_and(|val| allowed.iter().any(|a| a == val));
+                if !is_allowed {
+                    let mut params = RuleParams::new();
+                    params.insert("allowed", allowed.join(", "));
+                    errors.push(rule_ctx.create_issue("subset_of", params, inline));
+                    if self.bail_on_fail {
+                        return Err(errors);
+                    }
+                    break;
+                }
+            }
+        }
+
+        for expected in &self.contains_items {
+            if !items.iter().any(|item| item == expected) {
+                let mut params = RuleParams::new();
+                params.insert("expected", expected.to_string());
+                errors.push(rule_ctx.create_issue("contains", params, inline));
+                if self.bail_on_fail {
+                    return Err(errors);
+                }
+            }
+        }
+
+        if !self.contains_all_items.is_empty() {
+            let missing = self
+                .contains_all_items
+                .iter()
+                .any(|expected| !items.iter().any(|item| item == expected));
+            if missing {
+                errors.push(rule_ctx.create_issue("contains_all", RuleParams::new(), inline));
+                if self.bail_on_fail {
+                    return Err(errors);
+                }
+            }
+        }
+
+        for any_group in &self.contains_any_items {
+            if !any_group.is_empty()
+                && !any_group
+                    .iter()
+                    .any(|expected| items.iter().any(|item| item == expected))
+            {
+                errors.push(rule_ctx.create_issue("contains_any", RuleParams::new(), inline));
+                if self.bail_on_fail {
+                    return Err(errors);
+                }
+            }
+        }
+
+        for (index, item) in items.iter().enumerate() {
+            let item_path = if path.is_empty() {
+                format!("[{index}]")
+            } else {
+                format!("{path}[{index}]")
+            };
+
+            if let Err(element_errors) =
+                self.element_schema
+                    .check_path(item, &item_path, context, Some(value), messages)
+            {
+                errors.merge(element_errors);
+                if self.bail_on_fail {
+                    return Err(errors);
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
         } else {
             Err(errors)
         }

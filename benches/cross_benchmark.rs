@@ -17,6 +17,88 @@ use zod_rs::prelude::{
     string as zod_string,
 };
 
+// --- Jachai Typed Structs ---
+#[derive(Deserialize, Clone)]
+struct JachaiFlat {
+    username: String,
+    email: String,
+    age: i64,
+}
+
+impl JachaiFlat {
+    #[inline(always)]
+    fn validate(
+        &self,
+        username_s: &jachai::schema::StringSchema,
+        email_s: &jachai::schema::StringSchema,
+        age_s: &jachai::schema::IntegerSchema,
+    ) -> Result<(), jachai::ValidationError> {
+        username_s.check_str(&self.username)?;
+        email_s.check_str(&self.email)?;
+        age_s.check_i64(self.age)?;
+        Ok(())
+    }
+}
+
+#[derive(Deserialize, Clone)]
+struct JachaiProfile {
+    full_name: String,
+    city: String,
+}
+
+#[derive(Deserialize, Clone)]
+struct JachaiNested {
+    username: String,
+    email: String,
+    profile: JachaiProfile,
+}
+
+impl JachaiNested {
+    #[inline(always)]
+    fn validate(
+        &self,
+        username_s: &jachai::schema::StringSchema,
+        email_s: &jachai::schema::StringSchema,
+        full_name_s: &jachai::schema::StringSchema,
+        city_s: &jachai::schema::StringSchema,
+    ) -> Result<(), jachai::ValidationError> {
+        username_s.check_str(&self.username)?;
+        email_s.check_str(&self.email)?;
+        full_name_s.check_str(&self.profile.full_name)?;
+        city_s.check_str(&self.profile.city)?;
+        Ok(())
+    }
+}
+
+#[derive(Deserialize, Clone)]
+struct JachaiItem {
+    name: String,
+    email: String,
+    score: i64,
+}
+
+#[derive(Deserialize, Clone)]
+struct JachaiArrayBatch {
+    items: Vec<JachaiItem>,
+}
+
+impl JachaiArrayBatch {
+    #[inline(always)]
+    fn validate(
+        &self,
+        name_s: &jachai::schema::StringSchema,
+        email_s: &jachai::schema::StringSchema,
+        score_s: &jachai::schema::IntegerSchema,
+    ) -> Result<(), jachai::ValidationError> {
+        for item in &self.items {
+            name_s.check_str(&item.name)?;
+            email_s.check_str(&item.email)?;
+            score_s.check_i64(item.score)?;
+        }
+        Ok(())
+    }
+}
+
 // --- Garde Structs ---
 #[derive(garde::Validate, Deserialize, Clone)]
 struct GardeFlat {
@@ -221,8 +303,9 @@ where
 {
     let iterations = (target_ops / data.len()).max(1);
 
-    // Warmup
-    for _ in 0..3 {
+    // Warmup to stabilize CPU frequency scaling and cache lines
+    let warmup_batches = (5_000 / data.len()).max(10);
+    for _ in 0..warmup_batches {
         for item in data {
             op(item);
         }
@@ -271,6 +354,16 @@ fn main() {
             .field("email", zod_string().email())
             .field("age", zod_number().min(18.0).max(100.0));
 
+        let username_s = jachai::schema::string().min_len(3).max_len(30);
+        let email_s = jachai::schema::string().email();
+        let age_s = jachai::schema::integer().between(18, 100);
+
+        let jachai_flat_data: Vec<JachaiFlat> = corpus
+            .flat_valid
+            .iter()
+            .map(|v| serde_json::from_value(v.clone()).unwrap())
+            .collect();
+
         let garde_data: Vec<GardeFlat> = corpus
             .flat_valid
             .iter()
@@ -284,6 +377,24 @@ fn main() {
             .collect();
 
         let metrics = vec![
+            run_benchmark(
+                "jachai (typed struct)",
+                &jachai_flat_data,
+                |s| {
+                    let res = s.validate(&username_s, &email_s, &age_s);
+                    black_box(res).unwrap();
+                },
+                100_000,
+            ),
+            run_benchmark(
+                "jachai (check / in-place)",
+                &corpus.flat_valid,
+                |v| {
+                    let res = jachai_schema.check(v);
+                    black_box(res).unwrap();
+                },
+                100_000,
+            ),
             run_benchmark(
                 "jachai",
                 &corpus.flat_valid,
@@ -336,6 +447,22 @@ fn main() {
             .field("email", zod_string().email())
             .field("age", zod_number().min(18.0).max(100.0));
 
+        let username_s = jachai::schema::string().min_len(3).max_len(30);
+        let email_s = jachai::schema::string().email();
+        let age_s = jachai::schema::integer().between(18, 100);
+
+        let jachai_flat_invalid: Vec<JachaiFlat> = corpus
+            .flat_invalid
+            .iter()
+            .map(|v| {
+                serde_json::from_value(v.clone()).unwrap_or(JachaiFlat {
+                    username: "x".into(),
+                    email: "not-an-email".into(),
+                    age: 5,
+                })
+            })
+            .collect();
+
         let garde_data: Vec<GardeFlat> = corpus
             .flat_invalid
             .iter()
@@ -361,6 +488,24 @@ fn main() {
             .collect();
 
         let metrics = vec![
+            run_benchmark(
+                "jachai (typed struct)",
+                &jachai_flat_invalid,
+                |s| {
+                    let res = s.validate(&username_s, &email_s, &age_s);
+                    black_box(res.is_err());
+                },
+                100_000,
+            ),
+            run_benchmark(
+                "jachai (check / in-place)",
+                &corpus.flat_invalid,
+                |v| {
+                    let res = jachai_schema.check(v);
+                    black_box(res.is_err());
+                },
+                100_000,
+            ),
             run_benchmark(
                 "jachai",
                 &corpus.flat_invalid,
@@ -424,6 +569,17 @@ fn main() {
             .field("email", zod_string().email())
             .field("profile", zod_profile);
 
+        let username_s = jachai::schema::string().min_len(3).max_len(30);
+        let email_s = jachai::schema::string().email();
+        let full_name_s = jachai::schema::string().min_len(1).max_len(100);
+        let city_s = jachai::schema::string().min_len(1).max_len(50);
+
+        let jachai_nested_data: Vec<JachaiNested> = corpus
+            .nested_valid
+            .iter()
+            .map(|v| serde_json::from_value(v.clone()).unwrap())
+            .collect();
+
         let garde_data: Vec<GardeNested> = corpus
             .nested_valid
             .iter()
@@ -437,6 +593,24 @@ fn main() {
             .collect();
 
         let metrics = vec![
+            run_benchmark(
+                "jachai (typed struct)",
+                &jachai_nested_data,
+                |s| {
+                    let res = s.validate(&username_s, &email_s, &full_name_s, &city_s);
+                    black_box(res).unwrap();
+                },
+                100_000,
+            ),
+            run_benchmark(
+                "jachai (check / in-place)",
+                &corpus.nested_valid,
+                |v| {
+                    let res = jachai_schema.check(v);
+                    black_box(res).unwrap();
+                },
+                100_000,
+            ),
             run_benchmark(
                 "jachai",
                 &corpus.nested_valid,
@@ -500,6 +674,26 @@ fn main() {
             .field("email", zod_string().email())
             .field("profile", zod_profile);
 
+        let username_s = jachai::schema::string().min_len(3).max_len(30);
+        let email_s = jachai::schema::string().email();
+        let full_name_s = jachai::schema::string().min_len(1).max_len(100);
+        let city_s = jachai::schema::string().min_len(1).max_len(50);
+
+        let jachai_nested_invalid: Vec<JachaiNested> = corpus
+            .nested_invalid
+            .iter()
+            .map(|v| {
+                serde_json::from_value(v.clone()).unwrap_or(JachaiNested {
+                    username: "x".into(),
+                    email: "not-an-email".into(),
+                    profile: JachaiProfile {
+                        full_name: "".into(),
+                        city: "".into(),
+                    },
+                })
+            })
+            .collect();
+
         let garde_data: Vec<GardeNested> = corpus
             .nested_invalid
             .iter()
@@ -531,6 +725,24 @@ fn main() {
             .collect();
 
         let metrics = vec![
+            run_benchmark(
+                "jachai (typed struct)",
+                &jachai_nested_invalid,
+                |s| {
+                    let res = s.validate(&username_s, &email_s, &full_name_s, &city_s);
+                    black_box(res.is_err());
+                },
+                100_000,
+            ),
+            run_benchmark(
+                "jachai (check / in-place)",
+                &corpus.nested_invalid,
+                |v| {
+                    let res = jachai_schema.check(v);
+                    black_box(res.is_err());
+                },
+                100_000,
+            ),
             run_benchmark(
                 "jachai",
                 &corpus.nested_invalid,
@@ -585,6 +797,18 @@ fn main() {
             .field("score", zod_number().min(0.0).max(100.0));
         let zod_schema = ZodArraySchema::new(zod_item);
 
+        let name_s = jachai::schema::string().min_len(1).max_len(50);
+        let email_s = jachai::schema::string().email();
+        let score_s = jachai::schema::integer().between(0, 100);
+
+        let jachai_array_data: Vec<JachaiArrayBatch> = corpus
+            .array_valid
+            .iter()
+            .map(|v| JachaiArrayBatch {
+                items: serde_json::from_value(v.clone()).unwrap(),
+            })
+            .collect();
+
         let garde_data: Vec<GardeArrayBatch> = corpus
             .array_valid
             .iter()
@@ -602,6 +826,24 @@ fn main() {
             .collect();
 
         let metrics = vec![
+            run_benchmark(
+                "jachai (typed struct batch)",
+                &jachai_array_data,
+                |batch| {
+                    let res = batch.validate(&name_s, &email_s, &score_s);
+                    black_box(res).unwrap();
+                },
+                50_000,
+            ),
+            run_benchmark(
+                "jachai (check / in-place)",
+                &corpus.array_valid,
+                |v| {
+                    let res = jachai_schema.check(v);
+                    black_box(res).unwrap();
+                },
+                50_000,
+            ),
             run_benchmark(
                 "jachai",
                 &corpus.array_valid,
@@ -650,15 +892,99 @@ fn main() {
             .field("score", jachai::schema::integer().between(0, 100));
         let jachai_schema = jachai::schema::array(jachai_item);
 
-        let metrics = vec![run_benchmark(
-            "jachai (array invalid)",
-            &corpus.array_invalid,
-            |v| {
-                let res = jachai_schema.validate(v);
-                black_box(res.is_err());
-            },
-            50_000,
-        )];
+        let name_s = jachai::schema::string().min_len(1).max_len(50);
+        let email_s = jachai::schema::string().email();
+        let score_s = jachai::schema::integer().between(0, 100);
+
+        let jachai_array_invalid: Vec<JachaiArrayBatch> = corpus
+            .array_invalid
+            .iter()
+            .map(|v| {
+                serde_json::from_value(v.clone()).unwrap_or(JachaiArrayBatch {
+                    items: vec![JachaiItem {
+                        name: "".into(),
+                        email: "bad".into(),
+                        score: -1,
+                    }],
+                })
+            })
+            .collect();
+
+        let garde_data: Vec<GardeArrayBatch> = corpus
+            .array_invalid
+            .iter()
+            .map(|v| {
+                serde_json::from_value(v.clone()).unwrap_or(GardeArrayBatch {
+                    items: vec![GardeItem {
+                        name: "".into(),
+                        email: "bad".into(),
+                        score: -1,
+                    }],
+                })
+            })
+            .collect();
+
+        let validator_data: Vec<ValidatorArrayBatch> = corpus
+            .array_invalid
+            .iter()
+            .map(|v| {
+                serde_json::from_value(v.clone()).unwrap_or(ValidatorArrayBatch {
+                    items: vec![ValidatorItem {
+                        name: "".into(),
+                        email: "bad".into(),
+                        score: -1,
+                    }],
+                })
+            })
+            .collect();
+
+        let metrics = vec![
+            run_benchmark(
+                "jachai (typed struct batch)",
+                &jachai_array_invalid,
+                |batch| {
+                    let res = batch.validate(&name_s, &email_s, &score_s);
+                    black_box(res.is_err());
+                },
+                50_000,
+            ),
+            run_benchmark(
+                "jachai (check / in-place)",
+                &corpus.array_invalid,
+                |v| {
+                    let res = jachai_schema.check(v);
+                    black_box(res.is_err());
+                },
+                50_000,
+            ),
+            run_benchmark(
+                "jachai",
+                &corpus.array_invalid,
+                |v| {
+                    let res = jachai_schema.validate(v);
+                    black_box(res.is_err());
+                },
+                50_000,
+            ),
+            run_benchmark(
+                "garde (in-memory struct)",
+                &garde_data,
+                |s| {
+                    let res = s.validate();
+                    black_box(res.is_err());
+                },
+                50_000,
+            ),
+            run_benchmark(
+                "validator (in-memory struct)",
+                &validator_data,
+                |s| {
+                    let res = s.validate();
+                    black_box(res.is_err());
+                },
+                50_000,
+            ),
+        ];
         results.insert("array_invalid".to_string(), metrics);
     }
 
@@ -834,6 +1160,15 @@ fn main() {
 
         let metrics = vec![
             run_benchmark(
+                "jachai (ipv4 / check_str)",
+                &corpus.ipv4_valid,
+                |s| {
+                    let res = jachai_ipv4.check_str(s);
+                    black_box(res).unwrap();
+                },
+                200_000,
+            ),
+            run_benchmark(
                 "jachai (ipv4)",
                 &ipv4_values,
                 |v| {
@@ -865,6 +1200,15 @@ fn main() {
                 &ipv6_values,
                 |v| {
                     let res = jachai_ipv6.validate(v);
+                    black_box(res).unwrap();
+                },
+                200_000,
+            ),
+            run_benchmark(
+                "jachai (url / check_str)",
+                &corpus.urls_valid,
+                |s| {
+                    let res = jachai_url.check_str(s);
                     black_box(res).unwrap();
                 },
                 200_000,
@@ -1019,6 +1363,15 @@ fn main() {
             .collect();
 
         let metrics = vec![
+            run_benchmark(
+                "jachai (credit_card / check_str)",
+                &corpus.credit_cards_valid,
+                |s| {
+                    let res = jachai_cc.check_str(s);
+                    black_box(res).unwrap();
+                },
+                200_000,
+            ),
             run_benchmark(
                 "jachai (credit_card)",
                 &cc_values,
@@ -1333,6 +1686,15 @@ fn main() {
                 200_000,
             ),
             run_benchmark(
+                "jachai (check_str / zero-alloc)",
+                &corpus.primitive_emails_valid,
+                |s| {
+                    let res = jachai_schema.check_str(s);
+                    black_box(res).unwrap();
+                },
+                200_000,
+            ),
+            run_benchmark(
                 "zod-rs",
                 &email_values,
                 |v| {
@@ -1375,6 +1737,15 @@ fn main() {
             .collect();
 
         let metrics = vec![
+            run_benchmark(
+                "jachai (check_str / zero-alloc)",
+                &corpus.primitive_emails_invalid,
+                |s| {
+                    let res = jachai_schema.check_str(s);
+                    black_box(res.is_err());
+                },
+                200_000,
+            ),
             run_benchmark(
                 "jachai",
                 &email_values,
@@ -1437,6 +1808,15 @@ fn main() {
                 500_000,
             ),
             run_benchmark(
+                "jachai (check_i64 / zero-alloc)",
+                &corpus.primitive_integers_valid,
+                |&n| {
+                    let res = jachai_schema.check_i64(n);
+                    black_box(res).unwrap();
+                },
+                500_000,
+            ),
+            run_benchmark(
                 "zod-rs",
                 &int_values,
                 |v| {
@@ -1483,6 +1863,10 @@ fn main() {
             .field("email", zod_string().email())
             .field("age", zod_number().min(18.0).max(100.0));
 
+        let username_s = jachai::schema::string().min_len(3).max_len(30);
+        let email_s = jachai::schema::string().email();
+        let age_s = jachai::schema::integer().between(18, 100);
+
         let raw_json_strings: Vec<String> = corpus
             .flat_valid
             .iter()
@@ -1490,6 +1874,21 @@ fn main() {
             .collect();
 
         let metrics = vec![
+            run_benchmark(
+                "jachai (serde deserialize + check)",
+                &raw_json_strings,
+                |s| {
+                    let model: JachaiFlat = serde_json::from_str(s).unwrap();
+                    let res = (|| {
+                        username_s.check_str(&model.username)?;
+                        email_s.check_str(&model.email)?;
+                        age_s.check_i64(model.age)?;
+                        Ok::<(), jachai::ValidationError>(())
+                    })();
+                    black_box(res).unwrap();
+                },
+                100_000,
+            ),
             run_benchmark(
                 "jachai (parse json + validate)",
                 &raw_json_strings,
@@ -1561,6 +1960,15 @@ fn main() {
                 500_000,
             ),
             run_benchmark(
+                "jachai (check_f64 / zero-alloc)",
+                &corpus.primitive_floats_valid,
+                |&n| {
+                    let res = jachai_schema.check_f64(n);
+                    black_box(res).unwrap();
+                },
+                500_000,
+            ),
+            run_benchmark(
                 "zod-rs",
                 &float_values,
                 |v| {
@@ -1583,15 +1991,26 @@ fn main() {
             .map(Value::Bool)
             .collect();
 
-        let metrics = vec![run_benchmark(
-            "jachai (boolean accepted)",
-            &bool_values,
-            |v| {
-                let res = jachai_schema.validate(v);
-                black_box(res).unwrap();
-            },
-            500_000,
-        )];
+        let metrics = vec![
+            run_benchmark(
+                "jachai (boolean accepted)",
+                &bool_values,
+                |v| {
+                    let res = jachai_schema.validate(v);
+                    black_box(res).unwrap();
+                },
+                500_000,
+            ),
+            run_benchmark(
+                "jachai (check_bool / zero-alloc)",
+                &corpus.primitive_booleans_valid,
+                |&b| {
+                    let res = jachai_schema.check_bool(b);
+                    black_box(res).unwrap();
+                },
+                500_000,
+            ),
+        ];
         results.insert("primitive_boolean".to_string(), metrics);
     }
 
@@ -1607,15 +2026,26 @@ fn main() {
             .map(|s| Value::String(s.clone()))
             .collect();
 
-        let metrics = vec![run_benchmark(
-            "jachai (prefix/suffix/contains)",
-            &str_values,
-            |v| {
-                let res = jachai_schema.validate(v);
-                black_box(res).unwrap();
-            },
-            200_000,
-        )];
+        let metrics = vec![
+            run_benchmark(
+                "jachai (prefix/suffix/contains)",
+                &str_values,
+                |v| {
+                    let res = jachai_schema.validate(v);
+                    black_box(res).unwrap();
+                },
+                200_000,
+            ),
+            run_benchmark(
+                "jachai (check_str / zero-alloc)",
+                &corpus.string_rules_valid,
+                |s| {
+                    let res = jachai_schema.check_str(s);
+                    black_box(res).unwrap();
+                },
+                200_000,
+            ),
+        ];
         results.insert("string_rules".to_string(), metrics);
     }
 

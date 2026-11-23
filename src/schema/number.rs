@@ -329,6 +329,75 @@ impl NumberSchema {
             NumberPredicate::Custom(rule) => rule.validate(&value, rule_context).err(),
         }
     }
+
+    #[inline(always)]
+    fn matches_predicate(&self, predicate: &NumberPredicate, value: f64) -> bool {
+        match predicate {
+            NumberPredicate::Min(min) => value >= *min,
+            NumberPredicate::Max(max) => value <= *max,
+            NumberPredicate::Range(min, max) => value >= *min && value <= *max,
+            NumberPredicate::Integer => value.fract() == 0.0,
+            NumberPredicate::Positive => value > 0.0,
+            NumberPredicate::Negative => value < 0.0,
+            NumberPredicate::NonPositive => value <= 0.0,
+            NumberPredicate::NonNegative => value >= 0.0,
+            NumberPredicate::MultipleOf(step) => {
+                if *step == 0.0 {
+                    false
+                } else {
+                    let rem = value % *step;
+                    rem.abs() < 1e-9 || (*step - rem.abs()).abs() < 1e-9
+                }
+            }
+            NumberPredicate::Finite => value.is_finite(),
+            NumberPredicate::SafeInteger => {
+                value.fract() == 0.0 && (-9007199254740991.0..=9007199254740991.0).contains(&value)
+            }
+            NumberPredicate::Latitude => (-90.0..=90.0).contains(&value),
+            NumberPredicate::Longitude => (-180.0..=180.0).contains(&value),
+            _ => false,
+        }
+    }
+
+    /// Checks that a 64-bit float conforms to all bounds rules without requiring `Value` wrappers.
+    pub fn check_f64(&self, input: f64) -> Result<(), ValidationError> {
+        if self
+            .predicates
+            .iter()
+            .all(|predicate| self.matches_predicate(predicate, input))
+        {
+            return Ok(());
+        }
+
+        let context = ValidationContext::new();
+        let rule_ctx = RuleContext::new(
+            "",
+            &context,
+            None,
+            crate::messages::default_messages_provider(),
+        );
+
+        let mut errors = ValidationError::new();
+        for predicate in &self.predicates {
+            if let Some(issue) = self.evaluate_predicate(predicate, input, &rule_ctx) {
+                errors.push(issue);
+                if self.bail_on_fail {
+                    break;
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// Validates a 64-bit float, returning it on success.
+    pub fn validate_f64(&self, input: f64) -> Result<f64, ValidationError> {
+        self.check_f64(input).map(|_| input)
+    }
 }
 
 impl Schema<f64> for NumberSchema {
@@ -342,16 +411,38 @@ impl Schema<f64> for NumberSchema {
     ) -> Result<f64, ValidationError> {
         let rule_ctx = RuleContext::new(path, context, parent_data, messages);
 
-        let parsed_num = match coerce_to_number(value) {
-            Some(num) => num.as_f64().unwrap_or(0.0),
-            None => {
-                let rule_name = if value.is_null() {
-                    "required"
-                } else {
-                    "number"
-                };
+        let parsed_num = match value {
+            Value::Number(num) => num.as_f64().unwrap_or(0.0),
+            Value::String(_) => match coerce_to_number(value) {
+                Some(num) => num.as_f64().unwrap_or(0.0),
+                None => {
+                    let issue = rule_ctx.create_issue(
+                        "number",
+                        RuleParams::new(),
+                        self.inline_message.as_deref(),
+                    );
+                    return Err(ValidationError::single(
+                        issue.field,
+                        issue.rule,
+                        issue.message,
+                    ));
+                }
+            },
+            Value::Null => {
                 let issue = rule_ctx.create_issue(
-                    rule_name,
+                    "required",
+                    RuleParams::new(),
+                    self.inline_message.as_deref(),
+                );
+                return Err(ValidationError::single(
+                    issue.field,
+                    issue.rule,
+                    issue.message,
+                ));
+            }
+            _ => {
+                let issue = rule_ctx.create_issue(
+                    "number",
                     RuleParams::new(),
                     self.inline_message.as_deref(),
                 );
@@ -375,6 +466,87 @@ impl Schema<f64> for NumberSchema {
 
         if errors.is_empty() {
             Ok(parsed_num)
+        } else {
+            Err(errors)
+        }
+    }
+
+    fn check_path(
+        &self,
+        value: &Value,
+        path: &str,
+        context: &ValidationContext,
+        parent_data: Option<&Value>,
+        messages: &dyn MessagesProvider,
+    ) -> Result<(), ValidationError> {
+        if let Value::Number(num) = value {
+            let parsed_num = num.as_f64().unwrap_or(0.0);
+            if self
+                .predicates
+                .iter()
+                .all(|predicate| self.matches_predicate(predicate, parsed_num))
+            {
+                return Ok(());
+            }
+        }
+
+        let rule_ctx = RuleContext::new(path, context, parent_data, messages);
+
+        let parsed_num = match value {
+            Value::Number(num) => num.as_f64().unwrap_or(0.0),
+            Value::String(_) => match coerce_to_number(value) {
+                Some(num) => num.as_f64().unwrap_or(0.0),
+                None => {
+                    let issue = rule_ctx.create_issue(
+                        "number",
+                        RuleParams::new(),
+                        self.inline_message.as_deref(),
+                    );
+                    return Err(ValidationError::single(
+                        issue.field,
+                        issue.rule,
+                        issue.message,
+                    ));
+                }
+            },
+            Value::Null => {
+                let issue = rule_ctx.create_issue(
+                    "required",
+                    RuleParams::new(),
+                    self.inline_message.as_deref(),
+                );
+                return Err(ValidationError::single(
+                    issue.field,
+                    issue.rule,
+                    issue.message,
+                ));
+            }
+            _ => {
+                let issue = rule_ctx.create_issue(
+                    "number",
+                    RuleParams::new(),
+                    self.inline_message.as_deref(),
+                );
+                return Err(ValidationError::single(
+                    issue.field,
+                    issue.rule,
+                    issue.message,
+                ));
+            }
+        };
+
+        let mut errors = ValidationError::new();
+        for predicate in &self.predicates {
+            if let Some(issue) = self.evaluate_predicate(predicate, parsed_num, &rule_ctx) {
+                errors.push(issue);
+                if self.bail_on_fail {
+                    break;
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
         } else {
             Err(errors)
         }
@@ -620,6 +792,62 @@ impl IntegerSchema {
         self.inner = self.inner.with_message(message);
         self
     }
+
+    /// Checks that a 64-bit integer conforms to all bounds rules without requiring `Value` wrappers.
+    pub fn check_i64(&self, input: i64) -> Result<(), ValidationError> {
+        let val_f64 = input as f64;
+        for predicate in &self.inner.predicates {
+            match predicate {
+                NumberPredicate::Integer => continue,
+                NumberPredicate::Min(min) => {
+                    if val_f64 < *min {
+                        return self.inner.check_f64(val_f64);
+                    }
+                }
+                NumberPredicate::Max(max) => {
+                    if val_f64 > *max {
+                        return self.inner.check_f64(val_f64);
+                    }
+                }
+                NumberPredicate::Range(min, max) => {
+                    if val_f64 < *min || val_f64 > *max {
+                        return self.inner.check_f64(val_f64);
+                    }
+                }
+                NumberPredicate::Positive => {
+                    if input <= 0 {
+                        return self.inner.check_f64(val_f64);
+                    }
+                }
+                NumberPredicate::Negative => {
+                    if input >= 0 {
+                        return self.inner.check_f64(val_f64);
+                    }
+                }
+                NumberPredicate::NonPositive => {
+                    if input > 0 {
+                        return self.inner.check_f64(val_f64);
+                    }
+                }
+                NumberPredicate::NonNegative => {
+                    if input < 0 {
+                        return self.inner.check_f64(val_f64);
+                    }
+                }
+                _ => {
+                    if !self.inner.matches_predicate(predicate, val_f64) {
+                        return self.inner.check_f64(val_f64);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Validates a 64-bit integer, returning it on success.
+    pub fn validate_i64(&self, input: i64) -> Result<i64, ValidationError> {
+        self.inner.check_f64(input as f64).map(|_| input)
+    }
 }
 
 impl Schema<i64> for IntegerSchema {
@@ -635,6 +863,18 @@ impl Schema<i64> for IntegerSchema {
             .inner
             .validate_path(value, path, context, parent_data, messages)?;
         Ok(float_val as i64)
+    }
+
+    fn check_path(
+        &self,
+        value: &Value,
+        path: &str,
+        context: &ValidationContext,
+        parent_data: Option<&Value>,
+        messages: &dyn MessagesProvider,
+    ) -> Result<(), ValidationError> {
+        self.inner
+            .check_path(value, path, context, parent_data, messages)
     }
 
     #[cfg(feature = "async")]

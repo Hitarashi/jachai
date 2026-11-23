@@ -41,6 +41,15 @@ trait ErasedField: Send + Sync {
         messages: &dyn MessagesProvider,
     ) -> Result<Value, ValidationError>;
 
+    fn check_field(
+        &self,
+        value: &Value,
+        path: &str,
+        context: &ValidationContext,
+        parent_data: Option<&Value>,
+        messages: &dyn MessagesProvider,
+    ) -> Result<(), ValidationError>;
+
     #[cfg(feature = "async")]
     fn validate_async_field<'a>(
         &'a self,
@@ -50,6 +59,38 @@ trait ErasedField: Send + Sync {
         parent_data: Option<&'a Value>,
         messages: &'a dyn MessagesProvider,
     ) -> BoxFuture<'a, Result<Value, ValidationError>>;
+}
+
+#[inline]
+fn typed_to_value<T: serde::Serialize + 'static>(
+    typed: T,
+    path: &str,
+) -> Result<Value, ValidationError> {
+    let any_ref = &typed as &dyn std::any::Any;
+    if let Some(v) = any_ref.downcast_ref::<Value>() {
+        return Ok(v.clone());
+    }
+    if let Some(s) = any_ref.downcast_ref::<String>() {
+        return Ok(Value::String(s.clone()));
+    }
+    if let Some(n) = any_ref.downcast_ref::<i64>() {
+        return Ok(Value::Number((*n).into()));
+    }
+    if let Some(n) = any_ref.downcast_ref::<u64>() {
+        return Ok(Value::Number((*n).into()));
+    }
+    if let Some(n) = any_ref.downcast_ref::<f64>() {
+        return Ok(serde_json::Number::from_f64(*n)
+            .map(Value::Number)
+            .unwrap_or(Value::Null));
+    }
+    if let Some(b) = any_ref.downcast_ref::<bool>() {
+        return Ok(Value::Bool(*b));
+    }
+    serde_json::to_value(&typed).map_err(|err| {
+        let issue = ValidationIssue::new(path, "serialization", err.to_string());
+        ValidationError::single(issue.field, issue.rule, issue.message)
+    })
 }
 
 struct FieldEntry<S, T> {
@@ -82,11 +123,19 @@ where
         let typed_result =
             self.schema
                 .validate_path(value, path, context, parent_data, messages)?;
+        typed_to_value(typed_result, path)
+    }
 
-        serde_json::to_value(&typed_result).map_err(|err| {
-            let issue = ValidationIssue::new(path, "serialization", err.to_string());
-            ValidationError::single(issue.field, issue.rule, issue.message)
-        })
+    fn check_field(
+        &self,
+        value: &Value,
+        path: &str,
+        context: &ValidationContext,
+        parent_data: Option<&Value>,
+        messages: &dyn MessagesProvider,
+    ) -> Result<(), ValidationError> {
+        self.schema
+            .check_path(value, path, context, parent_data, messages)
     }
 
     #[cfg(feature = "async")]
@@ -103,11 +152,7 @@ where
                 .schema
                 .validate_async_path(value, path, context, parent_data, messages)
                 .await?;
-
-            serde_json::to_value(&typed_result).map_err(|err| {
-                let issue = ValidationIssue::new(path, "serialization", err.to_string());
-                ValidationError::single(issue.field, issue.rule, issue.message)
-            })
+            typed_to_value(typed_result, path)
         })
     }
 }
@@ -135,6 +180,18 @@ impl ErasedField for OptionalWrapper {
     ) -> Result<Value, ValidationError> {
         self.inner
             .validate_field(value, path, context, parent_data, messages)
+    }
+
+    fn check_field(
+        &self,
+        value: &Value,
+        path: &str,
+        context: &ValidationContext,
+        parent_data: Option<&Value>,
+        messages: &dyn MessagesProvider,
+    ) -> Result<(), ValidationError> {
+        self.inner
+            .check_field(value, path, context, parent_data, messages)
     }
 
     #[cfg(feature = "async")]
@@ -793,7 +850,7 @@ impl CrossFieldRule {
                     let full_path = qualify_path(path, &confirmation_field);
                     let mut params = RuleParams::new();
                     params.insert("field", field.clone());
-                    params.insert("other", confirmation_field);
+                    params.insert("other", confirmation_field.clone());
                     Some(rule_ctx.create_issue_at(
                         &full_path,
                         "confirmed",
@@ -1326,6 +1383,103 @@ impl ObjectSchema {
         })
     }
 
+    /// Checks that the JSON value conforms to this object schema without allocating a sanitized output map.
+    pub fn check(&self, value: &Value) -> Result<(), ValidationError> {
+        let context = ValidationContext::new();
+        self.check_path(
+            value,
+            "",
+            &context,
+            None,
+            crate::messages::default_messages_provider(),
+        )
+    }
+
+    /// Internal evaluation method checking conformity without allocating sanitized output maps.
+    pub fn check_path(
+        &self,
+        value: &Value,
+        path: &str,
+        context: &ValidationContext,
+        parent_data: Option<&Value>,
+        messages: &dyn MessagesProvider,
+    ) -> Result<(), ValidationError> {
+        let composite = CompositeMessagesProvider {
+            local: &self.custom_messages,
+            parent: messages,
+        };
+        let rule_ctx = RuleContext::new(path, context, parent_data, &composite);
+        let inline = self.inline_message.as_deref();
+
+        let map = match value {
+            Value::Object(obj) => obj,
+            Value::Null => {
+                let issue = rule_ctx.create_issue("required", RuleParams::new(), inline);
+                return Err(ValidationError::single(
+                    issue.field,
+                    issue.rule,
+                    issue.message,
+                ));
+            }
+            _ => {
+                let issue = rule_ctx.create_issue("required", RuleParams::new(), inline);
+                return Err(ValidationError::single(
+                    issue.field,
+                    issue.rule,
+                    issue.message,
+                ));
+            }
+        };
+
+        let mut errors = ValidationError::new();
+
+        if self.unknown_policy == UnknownFieldPolicy::Strict {
+            for key in map.keys() {
+                if !self.fields.contains_key(key) {
+                    let field_path = qualify_path(path, key);
+                    let mut params = RuleParams::new();
+                    params.insert("field", key.clone());
+                    let issue = rule_ctx.create_issue("unknown_field", params, inline);
+                    errors.push(ValidationIssue {
+                        field: field_path.into_owned(),
+                        rule: "unknown_field".to_string(),
+                        message: issue.message,
+                        params: issue.params,
+                    });
+                    if self.bail_on_fail {
+                        return Err(errors);
+                    }
+                }
+            }
+        }
+
+        for (field_name, field_def) in &self.fields {
+            let field_path = qualify_path(path, field_name);
+            let input_val = map.get(field_name).unwrap_or(&Value::Null);
+
+            if input_val.is_null() && field_def.is_optional() {
+                continue;
+            }
+
+            if let Err(field_err) =
+                field_def.check_field(input_val, &field_path, context, Some(value), &composite)
+            {
+                errors.merge(field_err);
+                if self.bail_on_fail {
+                    return Err(errors);
+                }
+            }
+        }
+
+        self.evaluate_cross_rules(map, path, &mut errors, &rule_ctx);
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
     fn evaluate_cross_rules(
         &self,
         map: &Map<String, Value>,
@@ -1381,7 +1535,7 @@ impl Schema<Value> for ObjectSchema {
         };
 
         let mut errors = ValidationError::new();
-        let mut result_map = Map::new();
+        let mut result_map = Map::with_capacity(self.fields.len());
 
         // 1. Check for unexpected unknown fields
         if self.unknown_policy == UnknownFieldPolicy::Strict {
@@ -1392,7 +1546,7 @@ impl Schema<Value> for ObjectSchema {
                     params.insert("field", key.clone());
                     let issue = rule_ctx.create_issue("unknown_field", params, inline);
                     errors.push(ValidationIssue {
-                        field: field_path,
+                        field: field_path.into_owned(),
                         rule: "unknown_field".to_string(),
                         message: issue.message,
                         params: issue.params,
@@ -1484,7 +1638,7 @@ impl Schema<Value> for ObjectSchema {
             };
 
             let mut errors = ValidationError::new();
-            let mut result_map = Map::new();
+            let mut result_map = Map::with_capacity(self.fields.len());
 
             if self.unknown_policy == UnknownFieldPolicy::Strict {
                 for key in map.keys() {
@@ -1494,7 +1648,7 @@ impl Schema<Value> for ObjectSchema {
                         params.insert("field", key.clone());
                         let issue = rule_ctx.create_issue("unknown_field", params, inline);
                         errors.push(ValidationIssue {
-                            field: field_path,
+                            field: field_path.into_owned(),
                             rule: "unknown_field".to_string(),
                             message: issue.message,
                             params: issue.params,
@@ -1569,10 +1723,11 @@ impl Schema<Value> for ObjectSchema {
     }
 }
 
-fn qualify_path(base_path: &str, field_name: &str) -> String {
+#[inline]
+fn qualify_path<'a>(base_path: &'a str, field_name: &'a str) -> std::borrow::Cow<'a, str> {
     if base_path.is_empty() {
-        field_name.to_string()
+        std::borrow::Cow::Borrowed(field_name)
     } else {
-        format!("{base_path}.{field_name}")
+        std::borrow::Cow::Owned(format!("{base_path}.{field_name}"))
     }
 }
