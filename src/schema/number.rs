@@ -23,7 +23,14 @@ enum NumberPredicate {
     Integer,
     Positive,
     Negative,
+    NonNegative,
+    NonPositive,
+    Finite,
     MultipleOf(f64),
+    DecimalPlaces(u32),
+    SafeInteger,
+    Latitude,
+    Longitude,
     Custom(Arc<dyn CustomRule<f64>>),
 }
 
@@ -91,6 +98,22 @@ impl NumberSchema {
         self
     }
 
+    /// Enforces that the value falls within an inclusive numeric range `[min, max]`.
+    ///
+    /// Ergonomic alias for `range(min, max)`.
+    #[must_use]
+    pub fn between(self, min: f64, max: f64) -> Self {
+        self.range(min, max)
+    }
+
+    /// Enforces that the number has at most `max_places` decimal places.
+    #[must_use]
+    pub fn decimal_places(mut self, max_places: u32) -> Self {
+        self.predicates
+            .push(NumberPredicate::DecimalPlaces(max_places));
+        self
+    }
+
     /// Enforces that the number has no fractional component.
     #[must_use]
     pub fn int(mut self) -> Self {
@@ -112,10 +135,52 @@ impl NumberSchema {
         self
     }
 
+    /// Enforces that the number is non-negative (`>= 0.0`).
+    #[must_use]
+    pub fn non_negative(mut self) -> Self {
+        self.predicates.push(NumberPredicate::NonNegative);
+        self
+    }
+
+    /// Enforces that the number is non-positive (`<= 0.0`).
+    #[must_use]
+    pub fn non_positive(mut self) -> Self {
+        self.predicates.push(NumberPredicate::NonPositive);
+        self
+    }
+
+    /// Enforces that the number is finite (neither infinite nor NaN).
+    #[must_use]
+    pub fn finite(mut self) -> Self {
+        self.predicates.push(NumberPredicate::Finite);
+        self
+    }
+
     /// Enforces that the number is an exact multiple of the specified step.
     #[must_use]
     pub fn multiple_of(mut self, step: f64) -> Self {
         self.predicates.push(NumberPredicate::MultipleOf(step));
+        self
+    }
+
+    /// Enforces that the number is an IEEE 754 safe integer in [-(2^53 - 1), 2^53 - 1].
+    #[must_use]
+    pub fn safe_integer(mut self) -> Self {
+        self.predicates.push(NumberPredicate::SafeInteger);
+        self
+    }
+
+    /// Enforces that the number is a valid latitude in [-90.0, 90.0].
+    #[must_use]
+    pub fn latitude(mut self) -> Self {
+        self.predicates.push(NumberPredicate::Latitude);
+        self
+    }
+
+    /// Enforces that the number is a valid longitude in [-180.0, 180.0].
+    #[must_use]
+    pub fn longitude(mut self) -> Self {
+        self.predicates.push(NumberPredicate::Longitude);
         self
     }
 
@@ -196,12 +261,67 @@ impl NumberSchema {
                     None
                 }
             }
+            NumberPredicate::NonNegative => {
+                if value < 0.0 {
+                    Some(rule_context.create_issue("non_negative", RuleParams::new(), inline))
+                } else {
+                    None
+                }
+            }
+            NumberPredicate::NonPositive => {
+                if value > 0.0 {
+                    Some(rule_context.create_issue("non_positive", RuleParams::new(), inline))
+                } else {
+                    None
+                }
+            }
+            NumberPredicate::Finite => {
+                if !value.is_finite() {
+                    Some(rule_context.create_issue("finite", RuleParams::new(), inline))
+                } else {
+                    None
+                }
+            }
             NumberPredicate::MultipleOf(step) => {
                 let remainder = (value / *step).fract();
                 if remainder.abs() > f64::EPSILON && (1.0 - remainder).abs() > f64::EPSILON {
                     let mut params = RuleParams::new();
                     params.insert("step", step.to_string());
                     Some(rule_context.create_issue("multiple_of", params, inline))
+                } else {
+                    None
+                }
+            }
+            NumberPredicate::DecimalPlaces(max_places) => {
+                let s = value.to_string();
+                let decimal_count = s.split_once('.').map(|(_, frac)| frac.len()).unwrap_or(0);
+                if decimal_count > *max_places as usize {
+                    let mut params = RuleParams::new();
+                    params.insert("max", max_places.to_string());
+                    params.insert("actual", decimal_count.to_string());
+                    Some(rule_context.create_issue("decimal_places", params, inline))
+                } else {
+                    None
+                }
+            }
+            NumberPredicate::SafeInteger => {
+                const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
+                if value.fract() != 0.0 || value < -MAX_SAFE_INTEGER || value > MAX_SAFE_INTEGER {
+                    Some(rule_context.create_issue("safe_integer", RuleParams::new(), inline))
+                } else {
+                    None
+                }
+            }
+            NumberPredicate::Latitude => {
+                if !(-90.0..=90.0).contains(&value) {
+                    Some(rule_context.create_issue("latitude", RuleParams::new(), inline))
+                } else {
+                    None
+                }
+            }
+            NumberPredicate::Longitude => {
+                if !(-180.0..=180.0).contains(&value) {
+                    Some(rule_context.create_issue("longitude", RuleParams::new(), inline))
                 } else {
                     None
                 }
@@ -293,6 +413,86 @@ impl Schema<f64> for NumberSchema {
             }
         })
     }
+
+    fn to_json_schema_value(&self) -> Value {
+        let mut map = serde_json::Map::new();
+        map.insert("type".to_string(), Value::String("number".to_string()));
+        for pred in &self.predicates {
+            match pred {
+                NumberPredicate::Min(min) => {
+                    let num_val = if min.fract() == 0.0 {
+                        serde_json::Number::from(*min as i64)
+                    } else {
+                        serde_json::Number::from_f64(*min).unwrap_or(0.into())
+                    };
+                    map.insert("minimum".to_string(), Value::Number(num_val));
+                }
+                NumberPredicate::Max(max) => {
+                    let num_val = if max.fract() == 0.0 {
+                        serde_json::Number::from(*max as i64)
+                    } else {
+                        serde_json::Number::from_f64(*max).unwrap_or(0.into())
+                    };
+                    map.insert("maximum".to_string(), Value::Number(num_val));
+                }
+                NumberPredicate::Range(min, max) => {
+                    let min_val = if min.fract() == 0.0 {
+                        serde_json::Number::from(*min as i64)
+                    } else {
+                        serde_json::Number::from_f64(*min).unwrap_or(0.into())
+                    };
+                    let max_val = if max.fract() == 0.0 {
+                        serde_json::Number::from(*max as i64)
+                    } else {
+                        serde_json::Number::from_f64(*max).unwrap_or(0.into())
+                    };
+                    map.insert("minimum".to_string(), Value::Number(min_val));
+                    map.insert("maximum".to_string(), Value::Number(max_val));
+                }
+                NumberPredicate::Integer => {
+                    map.insert("type".to_string(), Value::String("integer".to_string()));
+                }
+                NumberPredicate::Positive => {
+                    map.insert("exclusiveMinimum".to_string(), Value::Number(0.into()));
+                }
+                NumberPredicate::Negative => {
+                    map.insert("exclusiveMaximum".to_string(), Value::Number(0.into()));
+                }
+                NumberPredicate::NonNegative => {
+                    map.insert("minimum".to_string(), Value::Number(0.into()));
+                }
+                NumberPredicate::NonPositive => {
+                    map.insert("maximum".to_string(), Value::Number(0.into()));
+                }
+                NumberPredicate::MultipleOf(step) => {
+                    if let Some(n) = serde_json::Number::from_f64(*step) {
+                        map.insert("multipleOf".to_string(), Value::Number(n));
+                    }
+                }
+                NumberPredicate::SafeInteger => {
+                    map.insert("type".to_string(), Value::String("integer".to_string()));
+                    map.insert(
+                        "minimum".to_string(),
+                        Value::Number(serde_json::Number::from(-9_007_199_254_740_991_i64)),
+                    );
+                    map.insert(
+                        "maximum".to_string(),
+                        Value::Number(serde_json::Number::from(9_007_199_254_740_991_i64)),
+                    );
+                }
+                NumberPredicate::Latitude => {
+                    map.insert("minimum".to_string(), Value::Number((-90).into()));
+                    map.insert("maximum".to_string(), Value::Number(90.into()));
+                }
+                NumberPredicate::Longitude => {
+                    map.insert("minimum".to_string(), Value::Number((-180).into()));
+                    map.insert("maximum".to_string(), Value::Number(180.into()));
+                }
+                _ => {}
+            }
+        }
+        Value::Object(map)
+    }
 }
 
 /// Dedicated integer schema builder validating into `i64`.
@@ -337,6 +537,20 @@ impl IntegerSchema {
         self
     }
 
+    /// Enforces an inclusive integer range `[min, max]`.
+    ///
+    /// Ergonomic alias for `range(min, max)`.
+    #[must_use]
+    pub fn between(self, min: i64, max: i64) -> Self {
+        self.range(min, max)
+    }
+
+    /// Validates that the integer represents a valid network port (1 to 65535).
+    #[must_use]
+    pub fn port(self) -> Self {
+        self.between(1, 65535)
+    }
+
     /// Enforces that the integer is strictly positive (`> 0`).
     #[must_use]
     pub fn positive(mut self) -> Self {
@@ -351,10 +565,45 @@ impl IntegerSchema {
         self
     }
 
+    /// Enforces that the integer is non-negative (`>= 0`).
+    #[must_use]
+    pub fn non_negative(mut self) -> Self {
+        self.inner = self.inner.non_negative();
+        self
+    }
+
+    /// Enforces that the integer is non-positive (`<= 0`).
+    #[must_use]
+    pub fn non_positive(mut self) -> Self {
+        self.inner = self.inner.non_positive();
+        self
+    }
+
     /// Enforces that the integer is a multiple of `step`.
     #[must_use]
     pub fn multiple_of(mut self, step: i64) -> Self {
         self.inner = self.inner.multiple_of(step as f64);
+        self
+    }
+
+    /// Enforces that the integer is in the safe integer range [-(2^53 - 1), 2^53 - 1].
+    #[must_use]
+    pub fn safe_integer(mut self) -> Self {
+        self.inner = self.inner.safe_integer();
+        self
+    }
+
+    /// Enforces that the integer is a valid latitude in [-90, 90].
+    #[must_use]
+    pub fn latitude(mut self) -> Self {
+        self.inner = self.inner.latitude();
+        self
+    }
+
+    /// Enforces that the integer is a valid longitude in [-180, 180].
+    #[must_use]
+    pub fn longitude(mut self) -> Self {
+        self.inner = self.inner.longitude();
         self
     }
 
@@ -404,5 +653,13 @@ impl Schema<i64> for IntegerSchema {
                 .await?;
             Ok(float_val as i64)
         })
+    }
+
+    fn to_json_schema_value(&self) -> Value {
+        let mut val = self.inner.to_json_schema_value();
+        if let Value::Object(ref mut map) = val {
+            map.insert("type".to_string(), Value::String("integer".to_string()));
+        }
+        val
     }
 }

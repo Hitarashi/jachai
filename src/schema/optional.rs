@@ -68,6 +68,14 @@ where
                 .map(Some)
         })
     }
+
+    fn is_optional(&self) -> bool {
+        true
+    }
+
+    fn to_json_schema_value(&self) -> Value {
+        self.inner.to_json_schema_value()
+    }
 }
 
 /// Wraps an inner schema allowing explicit JSON `null`, producing `Option<T>`.
@@ -130,6 +138,32 @@ where
                 .map(Some)
         })
     }
+
+    fn is_optional(&self) -> bool {
+        true
+    }
+
+    fn to_json_schema_value(&self) -> Value {
+        let mut val = self.inner.to_json_schema_value();
+        if let Value::Object(ref mut map) = val {
+            if let Some(type_val) = map.get("type").cloned() {
+                match type_val {
+                    Value::String(s) => {
+                        map.insert(
+                            "type".to_string(),
+                            Value::Array(vec![Value::String(s), Value::String("null".to_string())]),
+                        );
+                    }
+                    Value::Array(mut arr) if !arr.iter().any(|v| v.as_str() == Some("null")) => {
+                        arr.push(Value::String("null".to_string()));
+                        map.insert("type".to_string(), Value::Array(arr));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        val
+    }
 }
 
 /// Wraps an inner schema, providing a fallback default value if the input is `null`.
@@ -189,5 +223,9 @@ where
                 .validate_async_path(value, path, context, parent_data, messages)
                 .await
         })
+    }
+
+    fn to_json_schema_value(&self) -> Value {
+        self.inner.to_json_schema_value()
     }
 }

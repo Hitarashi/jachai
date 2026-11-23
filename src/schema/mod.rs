@@ -2,7 +2,10 @@
 
 pub mod array;
 pub mod boolean;
+pub mod date;
 pub mod r#enum;
+pub mod file;
+pub mod json_schema;
 pub mod number;
 pub mod object;
 pub mod optional;
@@ -14,9 +17,12 @@ pub mod union;
 
 pub use array::ArraySchema;
 pub use boolean::BooleanSchema;
+pub use date::{DateFormat, DateSchema};
 pub use r#enum::EnumSchema;
+pub use file::{FileMetadata, FileSchema};
 #[cfg(feature = "async")]
 use futures_util::future::BoxFuture;
+pub use json_schema::ToJsonSchema;
 pub use number::{IntegerSchema, NumberSchema};
 pub use object::{ObjectSchema, UnknownFieldPolicy};
 pub use optional::{DefaultSchema, NullableSchema, OptionalSchema};
@@ -176,6 +182,28 @@ pub trait Schema<T>: Send + Sync + 'static {
     {
         RefineSchema::new(self, predicate, rule_name, message)
     }
+
+    /// Indicates whether this schema represents an optional or nullable field.
+    fn is_optional(&self) -> bool {
+        false
+    }
+
+    /// Generates a standard Draft 2020-12 / OpenAPI 3.1 JSON Schema representation.
+    fn to_json_schema_value(&self) -> Value {
+        Value::Object(serde_json::Map::new())
+    }
+}
+
+/// Creates a new date/time schema builder.
+#[must_use]
+pub fn date() -> DateSchema {
+    DateSchema::new()
+}
+
+/// Creates a new file metadata schema builder.
+#[must_use]
+pub fn file() -> FileSchema {
+    FileSchema::new()
 }
 
 /// Creates a new string schema builder.

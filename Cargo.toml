@@ -11,18 +11,81 @@ keywords = ["validator", "schema", "validation", "sanitization", "rfc9457"]
 categories = ["development-tools", "web-programming", "data-structures"]
 
 [features]
-default = ["async", "macros"]
+default = ["full"]
+full = [
+    "schemas",
+    "request",
+    "rfc9457",
+    "messages",
+    "coercion",
+    "regex",
+    "async",
+    "macros",
+]
+
+# Umbrella for all schema builders
+schemas = [
+    "schema-string",
+    "schema-number",
+    "schema-boolean",
+    "schema-array",
+    "schema-object",
+    "schema-record",
+    "schema-tuple",
+    "schema-union",
+    "schema-enum",
+    "schema-date",
+    "schema-file",
+    "schema-transform",
+    "schema-geo",
+    "schema-financial",
+    "schema-network",
+    "schema-identifiers",
+    "schema-color",
+    "schema-crypto",
+    "schema-business",
+]
+
+# Primitive schema validators
+schema-string = ["regex"]
+schema-number = []
+schema-boolean = []
+schema-array = []
+schema-object = []
+schema-record = []
+schema-tuple = []
+schema-union = []
+schema-enum = []
+schema-date = []
+schema-file = []
+schema-transform = []
+schema-geo = []
+schema-financial = []
+schema-network = []
+schema-identifiers = []
+schema-color = []
+schema-crypto = []
+schema-business = []
+
+# Protocol, transport, error format layers
+request = ["schema-object"]
+rfc9457 = []
+messages = []
+coercion = []
+
+# Optional dependencies & runtimes
+regex = ["dep:regex"]
 async = ["dep:futures-util"]
 macros = []
 
 [dependencies]
 # External Dependencies
-regex = { version = "1.13.2", default-features = false, features = ["std", "perf"] }
 serde = { version = "1.0.229", default-features = false, features = ["derive", "alloc"] }
 serde_json = { version = "1.0.154", default-features = false, features = ["alloc"] }
 
 # Optional Dependencies
 futures-util = { version = "0.3.34", optional = true, default-features = false, features = ["alloc"] }
+regex = { version = "1.13.2", optional = true, default-features = false, features = ["std", "perf"] }
 
 [dev-dependencies]
 proptest = "1.12.0"

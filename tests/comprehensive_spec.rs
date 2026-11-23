@@ -126,6 +126,44 @@ async fn test_array_schema_async_full_coverage() {
     let err_dist = s_dist.validate_async(&json!([1, 1])).await.unwrap_err();
     assert_eq!(err_dist.first_issue().unwrap().rule, "distinct");
 
+    // subset_of async
+    let s_sub = array(string()).subset_of(&["alpha", "beta"]).bail(true);
+    assert!(s_sub.validate_async(&json!(["alpha"])).await.is_ok());
+    let err_sub = s_sub.validate_async(&json!(["gamma"])).await.unwrap_err();
+    assert_eq!(err_sub.first_issue().unwrap().rule, "subset_of");
+    let err_sub_non_str = s_sub.validate_async(&json!([123])).await.unwrap_err();
+    assert_eq!(err_sub_non_str.first_issue().unwrap().rule, "subset_of");
+
+    // contains, contains_all, contains_any async with bail
+    let s_cnt = array(string())
+        .contains(json!("required_val"))
+        .contains_all([json!("all_1"), json!("all_2")])
+        .contains_any([json!("any_1"), json!("any_2")])
+        .bail(true);
+    let err_cnt = s_cnt.validate_async(&json!(["missing"])).await.unwrap_err();
+    assert_eq!(err_cnt.first_issue().unwrap().rule, "contains");
+
+    let s_all = array(string())
+        .contains_all([json!("all_1"), json!("all_2")])
+        .bail(true);
+    let err_all = s_all.validate_async(&json!(["all_1"])).await.unwrap_err();
+    assert_eq!(err_all.first_issue().unwrap().rule, "contains_all");
+
+    let s_any = array(string())
+        .contains_any([json!("any_1"), json!("any_2")])
+        .bail(true);
+    let err_any = s_any.validate_async(&json!(["other"])).await.unwrap_err();
+    assert_eq!(err_any.first_issue().unwrap().rule, "contains_any");
+
+    // without bail: accumulates multiple errors
+    let s_no_bail = array(integer())
+        .min_items(5)
+        .contains(json!(10))
+        .contains_all([json!(20)])
+        .contains_any([json!(30)]);
+    let err_accum = s_no_bail.validate_async(&json!([1])).await.unwrap_err();
+    assert!(err_accum.len() >= 3);
+
     // element failure bail
     let s_elem = array(integer().min(10)).bail(true);
     let err_elem = s_elem.validate_async(&json!([1, 2])).await.unwrap_err();

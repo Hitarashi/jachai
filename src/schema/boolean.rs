@@ -101,4 +101,10 @@ impl Schema<bool> for BooleanSchema {
 
         Ok(parsed_bool)
     }
+
+    fn to_json_schema_value(&self) -> Value {
+        let mut map = serde_json::Map::new();
+        map.insert("type".to_string(), Value::String("boolean".to_string()));
+        Value::Object(map)
+    }
 }

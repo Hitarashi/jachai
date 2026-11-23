@@ -34,6 +34,26 @@ To enable the declarative macro syntax and asynchronous validation rules (both e
 jachai = { version = "0.1.0", features = ["async", "macros"] }
 ```
 
+### Granular Feature Flags
+
+`jachai` supports fine-grained modular features so consumers only compile and link what they need:
+
+| Feature Flag | Description |
+|---|---|
+| `full` | Enables all schema modules, extended validation formats, macros, and async rules. |
+| `schemas` | Enables all built-in schema builders (`string`, `number`, `date`, `color`, `crypto`, etc.). |
+| `schema-string` | String schema builder, string format rules (email, URL, UUID, slug, semver, IP, etc.), and sanitization. |
+| `schema-color` | CSS color format validation (`rgb()`, `rgba()`, `hsl()`, `hsla()`). |
+| `schema-crypto` | Cryptocurrency addresses (`ethereum_address()`, `bitcoin_address()`). |
+| `schema-business` | Tax and business identifiers (`eu_vat()`, `ein()`, `ssn()`, `issn()`, `imei()`). |
+| `schema-identifiers` | System identifier formats (`mongodb_object_id()`, `bcp47()`, `cron()`, `ksuid()`). |
+| `schema-date` | ISO 8601 / RFC 3339 dates, times, durations, and calendar checks (`weekend()`, `weekday()`). |
+| `schema-file` | File upload metadata validation (MIME types, extensions, size bounds). |
+| `schema-number` | Numeric range, safe integer, multiple-of, port, and geo-coordinate checks. |
+| `async` | Asynchronous schema validation and async custom rule contracts. |
+| `macros` | Declarative `schema! { ... }` and `request_schema! { ... }` macros. |
+| `regex` | Regular expression pattern matching on string fields. |
+
 ## Quick Start
 
 ### Basic Object Validation

@@ -29,6 +29,7 @@ pub trait MessagesProvider: Send + Sync {
 pub struct SimpleMessagesProvider {
     rule_defaults: HashMap<String, String>,
     field_overrides: HashMap<String, String>,
+    field_labels: HashMap<String, String>,
 }
 
 impl Default for SimpleMessagesProvider {
@@ -36,6 +37,7 @@ impl Default for SimpleMessagesProvider {
         let mut provider = Self {
             rule_defaults: HashMap::new(),
             field_overrides: HashMap::new(),
+            field_labels: HashMap::new(),
         };
         provider.init_built_in_defaults();
         provider
@@ -47,6 +49,13 @@ impl SimpleMessagesProvider {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Registers a human-friendly display label for a field path.
+    ///
+    /// For example: `provider.set_field_label("company.tax_id", "Tax Identification Number")`
+    pub fn set_field_label(&mut self, field: impl Into<String>, label: impl Into<String>) {
+        self.field_labels.insert(field.into(), label.into());
     }
 
     /// Sets a default message template for a specific rule identifier.
@@ -138,6 +147,64 @@ impl SimpleMessagesProvider {
             ),
             ("accepted", "The :field field must be accepted."),
             ("date", "The :field field must be a valid ISO 8601 date."),
+            ("time", "The :field field must be a valid ISO 8601 time."),
+            (
+                "datetime",
+                "The :field field must be a valid RFC 3339 date-time.",
+            ),
+            (
+                "credit_card",
+                "The :field field must be a valid credit card number.",
+            ),
+            ("ulid", "The :field field must be a valid ULID."),
+            (
+                "hex_color",
+                "The :field field must be a valid hex color code.",
+            ),
+            ("slug", "The :field field must be a valid URL slug."),
+            (
+                "semver",
+                "The :field field must be a valid semantic version.",
+            ),
+            (
+                "base64",
+                "The :field field must be valid base64 encoded data.",
+            ),
+            (
+                "json_string",
+                "The :field field must be a valid JSON string.",
+            ),
+            ("in_list", "The selected :field is invalid."),
+            ("not_in_list", "The selected :field is not allowed."),
+            ("between", "The :field field must be between :min and :max."),
+            (
+                "port",
+                "The :field field must be a valid network port (1-65535).",
+            ),
+            (
+                "decimal_places",
+                "The :field field must have at most :max decimal places.",
+            ),
+            (
+                "required_with",
+                "The :field field is required when :other is present.",
+            ),
+            (
+                "prohibited_if",
+                "The :field field is prohibited when :other is :value.",
+            ),
+            (
+                "prohibited_with",
+                "The :field field is prohibited when :other is present.",
+            ),
+            (
+                "after_date",
+                "The :field field must be a date after :target.",
+            ),
+            (
+                "before_date",
+                "The :field field must be a date before :target.",
+            ),
             ("before", "The :field field must be a date before :target."),
             ("after", "The :field field must be a date after :target."),
             ("same_as", "The :field and :other fields must match."),
@@ -172,6 +239,218 @@ impl SimpleMessagesProvider {
                 "The selected :field is invalid. Expected one of: :expected.",
             ),
             ("unknown_field", "Field ':field' is not recognized."),
+            (
+                "e164",
+                "The :field field must be a valid E.164 phone number.",
+            ),
+            ("jwt", "The :field field must be a valid JSON Web Token."),
+            (
+                "mac_address",
+                "The :field field must be a valid MAC address.",
+            ),
+            ("mime_type", "The :field field must be a valid MIME type."),
+            (
+                "base64_url",
+                "The :field field must be valid base64url encoded data.",
+            ),
+            ("sha256", "The :field field must be a valid SHA-256 hash."),
+            ("sha512", "The :field field must be a valid SHA-512 hash."),
+            ("md5", "The :field field must be a valid MD5 hash."),
+            (
+                "non_control",
+                "The :field field cannot contain control characters.",
+            ),
+            ("finite", "The :field field must be a finite number."),
+            (
+                "non_negative",
+                "The :field field must be greater than or equal to zero.",
+            ),
+            (
+                "non_positive",
+                "The :field field must be less than or equal to zero.",
+            ),
+            (
+                "subset_of",
+                "The :field field contains disallowed items. Allowed values are: :allowed.",
+            ),
+            (
+                "file_min_size",
+                "The :field file must be at least :min bytes.",
+            ),
+            (
+                "file_max_size",
+                "The :field file may not be greater than :max bytes.",
+            ),
+            (
+                "file_extension",
+                "The :field file must have one of the following extensions: :allowed.",
+            ),
+            (
+                "file_mime_type",
+                "The :field file must have one of the following MIME types: :allowed.",
+            ),
+            (
+                "required_unless",
+                "The :field field is required unless :other is :value.",
+            ),
+            (
+                "required_with_all",
+                "The :field field is required when all of :others are present.",
+            ),
+            (
+                "required_without_all",
+                "The :field field is required when none of :others are present.",
+            ),
+            ("hostname", "The :field field must be a valid hostname."),
+            ("domain", "The :field field must be a valid domain name."),
+            (
+                "fqdn",
+                "The :field field must be a valid fully qualified domain name.",
+            ),
+            ("cidr", "The :field field must be a valid CIDR notation."),
+            (
+                "data_uri",
+                "The :field field must be a valid RFC 2397 Data URI.",
+            ),
+            (
+                "latitude",
+                "The :field field must be a valid latitude between -90 and 90 degrees.",
+            ),
+            (
+                "longitude",
+                "The :field field must be a valid longitude between -180 and 180 degrees.",
+            ),
+            (
+                "coordinates",
+                "The :field field must be valid geographic coordinates.",
+            ),
+            (
+                "postal_code",
+                "The :field field must be a valid postal code.",
+            ),
+            (
+                "iban",
+                "The :field field must be a valid International Bank Account Number (IBAN).",
+            ),
+            (
+                "bic",
+                "The :field field must be a valid Bank Identifier Code (BIC/SWIFT).",
+            ),
+            ("isbn", "The :field field must be a valid ISBN."),
+            ("isbn10", "The :field field must be a valid ISBN-10."),
+            ("isbn13", "The :field field must be a valid ISBN-13."),
+            (
+                "isin",
+                "The :field field must be a valid International Securities Identification Number (ISIN).",
+            ),
+            ("cuid", "The :field field must be a valid CUID."),
+            ("cuid2", "The :field field must be a valid CUID2."),
+            ("nanoid", "The :field field must be a valid NanoID."),
+            (
+                "country_code",
+                "The :field field must be a valid ISO 3166-1 country code.",
+            ),
+            (
+                "currency_code",
+                "The :field field must be a valid ISO 4217 currency code.",
+            ),
+            (
+                "hex",
+                "The :field field must only contain hexadecimal characters.",
+            ),
+            ("digits", "The :field field must only contain digits."),
+            (
+                "min_words",
+                "The :field field must contain at least :min words.",
+            ),
+            (
+                "max_words",
+                "The :field field may not contain more than :max words.",
+            ),
+            (
+                "words",
+                "The :field field must contain between :min and :max words.",
+            ),
+            (
+                "does_not_contain",
+                "The :field field may not contain ':disallowed'.",
+            ),
+            ("safe_integer", "The :field field must be a safe integer."),
+            (
+                "contains_all",
+                "The :field field must contain all required items.",
+            ),
+            (
+                "contains_any",
+                "The :field field must contain at least one of the required items.",
+            ),
+            (
+                "at_least_one_of",
+                "At least one of the following fields must be present: :fields.",
+            ),
+            (
+                "exactly_one_of",
+                "Exactly one of the following fields must be present: :fields.",
+            ),
+            (
+                "mutually_exclusive",
+                "The following fields are mutually exclusive: :fields.",
+            ),
+            ("rgb", "The :field field must be a valid RGB color."),
+            ("rgba", "The :field field must be a valid RGBA color."),
+            ("hsl", "The :field field must be a valid HSL color."),
+            ("hsla", "The :field field must be a valid HSLA color."),
+            (
+                "mongodb_object_id",
+                "The :field field must be a valid MongoDB ObjectId.",
+            ),
+            (
+                "bcp47",
+                "The :field field must be a valid BCP 47 language tag.",
+            ),
+            ("cron", "The :field field must be a valid cron expression."),
+            (
+                "duration",
+                "The :field field must be a valid ISO 8601 duration.",
+            ),
+            ("ksuid", "The :field field must be a valid KSUID."),
+            (
+                "eu_vat",
+                "The :field field must be a valid European Union VAT number.",
+            ),
+            (
+                "ein",
+                "The :field field must be a valid Employer Identification Number (EIN).",
+            ),
+            (
+                "ssn",
+                "The :field field must be a valid Social Security Number (SSN).",
+            ),
+            (
+                "issn",
+                "The :field field must be a valid International Standard Serial Number (ISSN).",
+            ),
+            (
+                "imei",
+                "The :field field must be a valid International Mobile Equipment Identity (IMEI).",
+            ),
+            (
+                "ethereum_address",
+                "The :field field must be a valid Ethereum address.",
+            ),
+            (
+                "bitcoin_address",
+                "The :field field must be a valid Bitcoin address.",
+            ),
+            (
+                "weekend",
+                "The :field field must be a date falling on a weekend.",
+            ),
+            (
+                "weekday",
+                "The :field field must be a date falling on a weekday.",
+            ),
+            ("confirmed", "The :field does not match."),
         ];
 
         for (rule, template) in defaults {
@@ -206,7 +485,8 @@ impl MessagesProvider for SimpleMessagesProvider {
             .or_else(|| self.rule_defaults.get(rule).map(String::as_str))
             .unwrap_or("The :field field failed validation (:rule).");
 
-        interpolate_placeholders(raw_template, field, rule, params)
+        let custom_label = self.field_labels.get(field).map(String::as_str);
+        interpolate_placeholders_with_label(raw_template, field, custom_label, rule, params)
     }
 }
 
@@ -217,10 +497,29 @@ pub fn interpolate_placeholders(
     rule: &str,
     params: &RuleParams,
 ) -> String {
+    interpolate_placeholders_with_label(template, field, None, rule, params)
+}
+
+/// Interpolates placeholders into a message template using an optional custom field label override.
+pub fn interpolate_placeholders_with_label(
+    template: &str,
+    field: &str,
+    label: Option<&str>,
+    rule: &str,
+    params: &RuleParams,
+) -> String {
     let mut rendered = template.to_string();
 
-    let display_field = humanize_field_name(field);
-    rendered = rendered.replace(":field", &display_field);
+    let humanized;
+    let display_field = match label {
+        Some(custom_label) => custom_label,
+        None => {
+            humanized = humanize_field_name(field);
+            humanized.as_str()
+        }
+    };
+    rendered = rendered.replace(":field", display_field);
+    rendered = rendered.replace(":label", display_field);
     rendered = rendered.replace(":rule", rule);
 
     for (key, val) in params.iter() {

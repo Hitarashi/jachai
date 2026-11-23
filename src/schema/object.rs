@@ -30,6 +30,8 @@ pub enum UnknownFieldPolicy {
 trait ErasedField: Send + Sync {
     fn is_optional(&self) -> bool;
 
+    fn to_json_schema(&self) -> Value;
+
     fn validate_field(
         &self,
         value: &Value,
@@ -62,7 +64,11 @@ where
     T: serde::Serialize + Send + Sync + 'static,
 {
     fn is_optional(&self) -> bool {
-        self.optional
+        self.optional || self.schema.is_optional()
+    }
+
+    fn to_json_schema(&self) -> Value {
+        self.schema.to_json_schema_value()
     }
 
     fn validate_field(
@@ -103,6 +109,45 @@ where
                 ValidationError::single(issue.field, issue.rule, issue.message)
             })
         })
+    }
+}
+
+struct OptionalWrapper {
+    inner: Arc<dyn ErasedField>,
+}
+
+impl ErasedField for OptionalWrapper {
+    fn is_optional(&self) -> bool {
+        true
+    }
+
+    fn to_json_schema(&self) -> Value {
+        self.inner.to_json_schema()
+    }
+
+    fn validate_field(
+        &self,
+        value: &Value,
+        path: &str,
+        context: &ValidationContext,
+        parent_data: Option<&Value>,
+        messages: &dyn MessagesProvider,
+    ) -> Result<Value, ValidationError> {
+        self.inner
+            .validate_field(value, path, context, parent_data, messages)
+    }
+
+    #[cfg(feature = "async")]
+    fn validate_async_field<'a>(
+        &'a self,
+        value: &'a Value,
+        path: &'a str,
+        context: &'a ValidationContext,
+        parent_data: Option<&'a Value>,
+        messages: &'a dyn MessagesProvider,
+    ) -> BoxFuture<'a, Result<Value, ValidationError>> {
+        self.inner
+            .validate_async_field(value, path, context, parent_data, messages)
     }
 }
 
@@ -160,6 +205,64 @@ enum CrossFieldRule {
     BeforeField {
         field: String,
         other: String,
+        custom_message: Option<String>,
+    },
+    RequiredWith {
+        field: String,
+        other: String,
+        custom_message: Option<String>,
+    },
+    ProhibitedIf {
+        field: String,
+        other: String,
+        expected: Value,
+        custom_message: Option<String>,
+    },
+    ProhibitedWith {
+        field: String,
+        other: String,
+        custom_message: Option<String>,
+    },
+    AfterDateField {
+        field: String,
+        other: String,
+        custom_message: Option<String>,
+    },
+    BeforeDateField {
+        field: String,
+        other: String,
+        custom_message: Option<String>,
+    },
+    RequiredUnless {
+        field: String,
+        other: String,
+        expected: Value,
+        custom_message: Option<String>,
+    },
+    RequiredWithAll {
+        field: String,
+        others: Vec<String>,
+        custom_message: Option<String>,
+    },
+    RequiredWithoutAll {
+        field: String,
+        others: Vec<String>,
+        custom_message: Option<String>,
+    },
+    AtLeastOneOf {
+        fields: Vec<String>,
+        custom_message: Option<String>,
+    },
+    ExactlyOneOf {
+        fields: Vec<String>,
+        custom_message: Option<String>,
+    },
+    MutuallyExclusive {
+        fields: Vec<String>,
+        custom_message: Option<String>,
+    },
+    Confirmed {
+        field: String,
         custom_message: Option<String>,
     },
 }
@@ -351,6 +454,420 @@ impl CrossFieldRule {
                     None
                 }
             }
+            Self::RequiredWith {
+                field,
+                other,
+                custom_message,
+            } => {
+                let dependency = map.get(other).unwrap_or(&Value::Null);
+                let dependency_is_present = !dependency.is_null()
+                    && !(dependency.is_string()
+                        && dependency.as_str().unwrap_or("").trim().is_empty());
+                if dependency_is_present {
+                    let target = map.get(field).unwrap_or(&Value::Null);
+                    let is_missing = target.is_null()
+                        || (target.is_string() && target.as_str().unwrap_or("").trim().is_empty());
+                    if is_missing {
+                        let full_path = qualify_path(path, field);
+                        let mut params = RuleParams::new();
+                        params.insert("field", field.clone());
+                        params.insert("other", other.clone());
+                        Some(rule_ctx.create_issue_at(
+                            &full_path,
+                            "required_with",
+                            params,
+                            custom_message.as_deref(),
+                        ))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            Self::ProhibitedIf {
+                field,
+                other,
+                expected,
+                custom_message,
+            } => {
+                let dependency = map.get(other).unwrap_or(&Value::Null);
+                if dependency == expected {
+                    let target = map.get(field).unwrap_or(&Value::Null);
+                    let target_is_present = !target.is_null()
+                        && !(target.is_string() && target.as_str().unwrap_or("").trim().is_empty());
+                    if target_is_present {
+                        let full_path = qualify_path(path, field);
+                        let mut params = RuleParams::new();
+                        params.insert("field", field.clone());
+                        params.insert("other", other.clone());
+                        params.insert("value", expected.to_string());
+                        Some(rule_ctx.create_issue_at(
+                            &full_path,
+                            "prohibited_if",
+                            params,
+                            custom_message.as_deref(),
+                        ))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            Self::ProhibitedWith {
+                field,
+                other,
+                custom_message,
+            } => {
+                let target = map.get(field).unwrap_or(&Value::Null);
+                let target_is_present = !target.is_null()
+                    && !(target.is_string() && target.as_str().unwrap_or("").trim().is_empty());
+                let dependency = map.get(other).unwrap_or(&Value::Null);
+                let dependency_is_present = !dependency.is_null()
+                    && !(dependency.is_string()
+                        && dependency.as_str().unwrap_or("").trim().is_empty());
+                if target_is_present && dependency_is_present {
+                    let full_path = qualify_path(path, field);
+                    let mut params = RuleParams::new();
+                    params.insert("field", field.clone());
+                    params.insert("other", other.clone());
+                    Some(rule_ctx.create_issue_at(
+                        &full_path,
+                        "prohibited_with",
+                        params,
+                        custom_message.as_deref(),
+                    ))
+                } else {
+                    None
+                }
+            }
+            Self::AfterDateField {
+                field,
+                other,
+                custom_message,
+            } => {
+                let val_a = map.get(field).unwrap_or(&Value::Null);
+                let val_b = map.get(other).unwrap_or(&Value::Null);
+                if let (Some(sa), Some(sb)) = (val_a.as_str(), val_b.as_str()) {
+                    if let (Some(ta), Some(tb)) = (
+                        crate::schema::date::parse_rfc3339_timestamp(sa),
+                        crate::schema::date::parse_rfc3339_timestamp(sb),
+                    ) {
+                        if ta <= tb {
+                            let full_path = qualify_path(path, field);
+                            let mut params = RuleParams::new();
+                            params.insert("field", field.clone());
+                            params.insert("target", other.clone());
+                            Some(rule_ctx.create_issue_at(
+                                &full_path,
+                                "after_date",
+                                params,
+                                custom_message.as_deref(),
+                            ))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            Self::BeforeDateField {
+                field,
+                other,
+                custom_message,
+            } => {
+                let val_a = map.get(field).unwrap_or(&Value::Null);
+                let val_b = map.get(other).unwrap_or(&Value::Null);
+                if let (Some(sa), Some(sb)) = (val_a.as_str(), val_b.as_str()) {
+                    if let (Some(ta), Some(tb)) = (
+                        crate::schema::date::parse_rfc3339_timestamp(sa),
+                        crate::schema::date::parse_rfc3339_timestamp(sb),
+                    ) {
+                        if ta >= tb {
+                            let full_path = qualify_path(path, field);
+                            let mut params = RuleParams::new();
+                            params.insert("field", field.clone());
+                            params.insert("target", other.clone());
+                            Some(rule_ctx.create_issue_at(
+                                &full_path,
+                                "before_date",
+                                params,
+                                custom_message.as_deref(),
+                            ))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            Self::RequiredUnless {
+                field,
+                other,
+                expected,
+                custom_message,
+            } => {
+                let dependency = map.get(other).unwrap_or(&Value::Null);
+                if dependency != expected {
+                    let target = map.get(field).unwrap_or(&Value::Null);
+                    let is_missing = target.is_null()
+                        || (target.is_string() && target.as_str().unwrap_or("").trim().is_empty());
+                    if is_missing {
+                        let full_path = qualify_path(path, field);
+                        let mut params = RuleParams::new();
+                        params.insert("field", field.clone());
+                        params.insert("other", other.clone());
+                        params.insert("value", expected.to_string());
+                        Some(rule_ctx.create_issue_at(
+                            &full_path,
+                            "required_unless",
+                            params,
+                            custom_message.as_deref(),
+                        ))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            Self::RequiredWithAll {
+                field,
+                others,
+                custom_message,
+            } => {
+                let all_present = others.iter().all(|o| {
+                    let val = map.get(o).unwrap_or(&Value::Null);
+                    !val.is_null()
+                        && !(val.is_string() && val.as_str().unwrap_or("").trim().is_empty())
+                });
+                if all_present {
+                    let target = map.get(field).unwrap_or(&Value::Null);
+                    let is_missing = target.is_null()
+                        || (target.is_string() && target.as_str().unwrap_or("").trim().is_empty());
+                    if is_missing {
+                        let full_path = qualify_path(path, field);
+                        let mut params = RuleParams::new();
+                        params.insert("field", field.clone());
+                        params.insert("others", others.join(", "));
+                        Some(rule_ctx.create_issue_at(
+                            &full_path,
+                            "required_with_all",
+                            params,
+                            custom_message.as_deref(),
+                        ))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            Self::RequiredWithoutAll {
+                field,
+                others,
+                custom_message,
+            } => {
+                let none_present = others.iter().all(|o| {
+                    let val = map.get(o).unwrap_or(&Value::Null);
+                    val.is_null()
+                        || (val.is_string() && val.as_str().unwrap_or("").trim().is_empty())
+                });
+                if none_present {
+                    let target = map.get(field).unwrap_or(&Value::Null);
+                    let is_missing = target.is_null()
+                        || (target.is_string() && target.as_str().unwrap_or("").trim().is_empty());
+                    if is_missing {
+                        let full_path = qualify_path(path, field);
+                        let mut params = RuleParams::new();
+                        params.insert("field", field.clone());
+                        params.insert("others", others.join(", "));
+                        Some(rule_ctx.create_issue_at(
+                            &full_path,
+                            "required_without_all",
+                            params,
+                            custom_message.as_deref(),
+                        ))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            Self::AtLeastOneOf {
+                fields,
+                custom_message,
+            } => {
+                let any_present = fields.iter().any(|f| {
+                    let val = map.get(f).unwrap_or(&Value::Null);
+                    !val.is_null()
+                        && !(val.is_string() && val.as_str().unwrap_or("").trim().is_empty())
+                });
+                if !any_present {
+                    let full_path =
+                        qualify_path(path, fields.first().map(String::as_str).unwrap_or(""));
+                    let mut params = RuleParams::new();
+                    params.insert("fields", fields.join(", "));
+                    Some(rule_ctx.create_issue_at(
+                        &full_path,
+                        "at_least_one_of",
+                        params,
+                        custom_message.as_deref(),
+                    ))
+                } else {
+                    None
+                }
+            }
+            Self::ExactlyOneOf {
+                fields,
+                custom_message,
+            } => {
+                let present_count = fields
+                    .iter()
+                    .filter(|f| {
+                        let val = map.get(f.as_str()).unwrap_or(&Value::Null);
+                        !val.is_null()
+                            && !(val.is_string() && val.as_str().unwrap_or("").trim().is_empty())
+                    })
+                    .count();
+                if present_count != 1 {
+                    let full_path =
+                        qualify_path(path, fields.first().map(String::as_str).unwrap_or(""));
+                    let mut params = RuleParams::new();
+                    params.insert("fields", fields.join(", "));
+                    params.insert("actual", present_count.to_string());
+                    Some(rule_ctx.create_issue_at(
+                        &full_path,
+                        "exactly_one_of",
+                        params,
+                        custom_message.as_deref(),
+                    ))
+                } else {
+                    None
+                }
+            }
+            Self::MutuallyExclusive {
+                fields,
+                custom_message,
+            } => {
+                let present_count = fields
+                    .iter()
+                    .filter(|f| {
+                        let val = map.get(f.as_str()).unwrap_or(&Value::Null);
+                        !val.is_null()
+                            && !(val.is_string() && val.as_str().unwrap_or("").trim().is_empty())
+                    })
+                    .count();
+                if present_count > 1 {
+                    let full_path =
+                        qualify_path(path, fields.first().map(String::as_str).unwrap_or(""));
+                    let mut params = RuleParams::new();
+                    params.insert("fields", fields.join(", "));
+                    params.insert("actual", present_count.to_string());
+                    Some(rule_ctx.create_issue_at(
+                        &full_path,
+                        "mutually_exclusive",
+                        params,
+                        custom_message.as_deref(),
+                    ))
+                } else {
+                    None
+                }
+            }
+            Self::Confirmed {
+                field,
+                custom_message,
+            } => {
+                let confirmation_field = format!("{field}_confirmation");
+                let val_a = map.get(field).unwrap_or(&Value::Null);
+                let val_b = map.get(&confirmation_field).unwrap_or(&Value::Null);
+                if val_a != val_b {
+                    let full_path = qualify_path(path, &confirmation_field);
+                    let mut params = RuleParams::new();
+                    params.insert("field", field.clone());
+                    params.insert("other", confirmation_field);
+                    Some(rule_ctx.create_issue_at(
+                        &full_path,
+                        "confirmed",
+                        params,
+                        custom_message.as_deref(),
+                    ))
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    fn references_only(&self, keys: &[&str]) -> bool {
+        match self {
+            Self::SameAs { field, other, .. }
+            | Self::DifferentFrom { field, other, .. }
+            | Self::RequiredIf { field, other, .. }
+            | Self::RequiredUnless { field, other, .. }
+            | Self::RequiredWithout { field, other, .. }
+            | Self::AfterField { field, other, .. }
+            | Self::BeforeField { field, other, .. }
+            | Self::RequiredWith { field, other, .. }
+            | Self::ProhibitedIf { field, other, .. }
+            | Self::ProhibitedWith { field, other, .. }
+            | Self::AfterDateField { field, other, .. }
+            | Self::BeforeDateField { field, other, .. } => {
+                keys.contains(&field.as_str()) && keys.contains(&other.as_str())
+            }
+            Self::Confirmed { field, .. } => {
+                let conf = format!("{field}_confirmation");
+                keys.contains(&field.as_str()) && keys.contains(&conf.as_str())
+            }
+            Self::RequiredWithAll { field, others, .. }
+            | Self::RequiredWithoutAll { field, others, .. } => {
+                keys.contains(&field.as_str()) && others.iter().all(|o| keys.contains(&o.as_str()))
+            }
+            Self::AtLeastOneOf { fields, .. }
+            | Self::ExactlyOneOf { fields, .. }
+            | Self::MutuallyExclusive { fields, .. } => {
+                fields.iter().all(|f| keys.contains(&f.as_str()))
+            }
+        }
+    }
+
+    fn references_any(&self, keys: &[&str]) -> bool {
+        match self {
+            Self::SameAs { field, other, .. }
+            | Self::DifferentFrom { field, other, .. }
+            | Self::RequiredIf { field, other, .. }
+            | Self::RequiredUnless { field, other, .. }
+            | Self::RequiredWithout { field, other, .. }
+            | Self::AfterField { field, other, .. }
+            | Self::BeforeField { field, other, .. }
+            | Self::RequiredWith { field, other, .. }
+            | Self::ProhibitedIf { field, other, .. }
+            | Self::ProhibitedWith { field, other, .. }
+            | Self::AfterDateField { field, other, .. }
+            | Self::BeforeDateField { field, other, .. } => {
+                keys.contains(&field.as_str()) || keys.contains(&other.as_str())
+            }
+            Self::Confirmed { field, .. } => {
+                let conf = format!("{field}_confirmation");
+                keys.contains(&field.as_str()) || keys.contains(&conf.as_str())
+            }
+            Self::RequiredWithAll { field, others, .. }
+            | Self::RequiredWithoutAll { field, others, .. } => {
+                keys.contains(&field.as_str()) || others.iter().any(|o| keys.contains(&o.as_str()))
+            }
+            Self::AtLeastOneOf { fields, .. }
+            | Self::ExactlyOneOf { fields, .. }
+            | Self::MutuallyExclusive { fields, .. } => {
+                fields.iter().any(|f| keys.contains(&f.as_str()))
+            }
         }
     }
 }
@@ -359,6 +876,7 @@ impl CrossFieldRule {
 #[derive(Clone)]
 pub struct ObjectSchema {
     fields: BTreeMap<String, Arc<dyn ErasedField>>,
+    field_order: Vec<String>,
     unknown_policy: UnknownFieldPolicy,
     cross_rules: Vec<CrossFieldRule>,
     custom_messages: SimpleMessagesProvider,
@@ -378,6 +896,7 @@ impl ObjectSchema {
     pub fn new() -> Self {
         Self {
             fields: BTreeMap::new(),
+            field_order: Vec::new(),
             unknown_policy: UnknownFieldPolicy::Strip,
             cross_rules: Vec::new(),
             custom_messages: SimpleMessagesProvider::default(),
@@ -393,12 +912,16 @@ impl ObjectSchema {
         S: Schema<T>,
         T: serde::Serialize + Send + Sync + 'static,
     {
+        let field_name = name.into();
         let entry = FieldEntry {
             schema,
             optional: false,
             phantom: std::marker::PhantomData,
         };
-        self.fields.insert(name.into(), Arc::new(entry));
+        if !self.field_order.contains(&field_name) {
+            self.field_order.push(field_name.clone());
+        }
+        self.fields.insert(field_name, Arc::new(entry));
         self
     }
 
@@ -409,12 +932,16 @@ impl ObjectSchema {
         S: Schema<T>,
         T: serde::Serialize + Send + Sync + 'static,
     {
+        let field_name = name.into();
         let entry = FieldEntry {
             schema,
             optional: true,
             phantom: std::marker::PhantomData,
         };
-        self.fields.insert(name.into(), Arc::new(entry));
+        if !self.field_order.contains(&field_name) {
+            self.field_order.push(field_name.clone());
+        }
+        self.fields.insert(field_name, Arc::new(entry));
         self
     }
 
@@ -556,6 +1083,200 @@ impl ObjectSchema {
     #[must_use]
     pub fn before_date(self, field: impl Into<String>, other: impl Into<String>) -> Self {
         self.before_field(field, other)
+    }
+
+    /// Asserts that `field` is present and non-null when `other` is present and non-null.
+    #[must_use]
+    pub fn required_with(mut self, field: impl Into<String>, other: impl Into<String>) -> Self {
+        self.cross_rules.push(CrossFieldRule::RequiredWith {
+            field: field.into(),
+            other: other.into(),
+            custom_message: None,
+        });
+        self
+    }
+
+    /// Asserts that `field` is absent/null when `other` matches `expected`.
+    #[must_use]
+    pub fn prohibited_if(
+        mut self,
+        field: impl Into<String>,
+        other: impl Into<String>,
+        expected: impl Into<Value>,
+    ) -> Self {
+        self.cross_rules.push(CrossFieldRule::ProhibitedIf {
+            field: field.into(),
+            other: other.into(),
+            expected: expected.into(),
+            custom_message: None,
+        });
+        self
+    }
+
+    /// Asserts that `field` and `other` cannot both be present and non-null simultaneously.
+    #[must_use]
+    pub fn prohibited_with(mut self, field: impl Into<String>, other: impl Into<String>) -> Self {
+        self.cross_rules.push(CrossFieldRule::ProhibitedWith {
+            field: field.into(),
+            other: other.into(),
+            custom_message: None,
+        });
+        self
+    }
+
+    /// Asserts that `field` is temporally after `other` based on RFC 3339 timestamp parsing.
+    #[must_use]
+    pub fn after_date_field(mut self, field: impl Into<String>, other: impl Into<String>) -> Self {
+        self.cross_rules.push(CrossFieldRule::AfterDateField {
+            field: field.into(),
+            other: other.into(),
+            custom_message: None,
+        });
+        self
+    }
+
+    /// Asserts that `field` is temporally before `other` based on RFC 3339 timestamp parsing.
+    #[must_use]
+    pub fn before_date_field(mut self, field: impl Into<String>, other: impl Into<String>) -> Self {
+        self.cross_rules.push(CrossFieldRule::BeforeDateField {
+            field: field.into(),
+            other: other.into(),
+            custom_message: None,
+        });
+        self
+    }
+
+    /// Extends this schema by merging another schema's fields and cross-field rules.
+    #[must_use]
+    pub fn extend(mut self, other: Self) -> Self {
+        for name in &other.field_order {
+            if !self.field_order.contains(name) {
+                self.field_order.push(name.clone());
+            }
+        }
+        for (name, field_def) in other.fields {
+            self.fields.insert(name, field_def);
+        }
+        self.cross_rules.extend(other.cross_rules);
+        self
+    }
+
+    /// Extends this schema by merging another schema's fields and cross-field rules.
+    ///
+    /// Alias for [`ObjectSchema::extend`].
+    #[must_use]
+    pub fn merge(self, other: Self) -> Self {
+        self.extend(other)
+    }
+
+    /// Derives a new `ObjectSchema` retaining only the specified field keys.
+    #[must_use]
+    pub fn pick(mut self, keys: &[&str]) -> Self {
+        self.field_order.retain(|k| keys.contains(&k.as_str()));
+        self.fields.retain(|k, _| keys.contains(&k.as_str()));
+        self.cross_rules.retain(|rule| rule.references_only(keys));
+        self
+    }
+
+    /// Derives a new `ObjectSchema` excluding the specified field keys.
+    #[must_use]
+    pub fn omit(mut self, keys: &[&str]) -> Self {
+        self.field_order.retain(|k| !keys.contains(&k.as_str()));
+        self.fields.retain(|k, _| !keys.contains(&k.as_str()));
+        self.cross_rules.retain(|rule| !rule.references_any(keys));
+        self
+    }
+
+    /// Derives a new `ObjectSchema` where all declared fields are converted to optional.
+    #[must_use]
+    pub fn partial(mut self) -> Self {
+        for field_def in self.fields.values_mut() {
+            if !field_def.is_optional() {
+                *field_def = Arc::new(OptionalWrapper {
+                    inner: field_def.clone(),
+                });
+            }
+        }
+        self
+    }
+
+    /// Asserts that `field` is present and non-null unless `other` equals `expected`.
+    #[must_use]
+    pub fn required_unless(
+        mut self,
+        field: impl Into<String>,
+        other: impl Into<String>,
+        expected: impl Into<Value>,
+    ) -> Self {
+        self.cross_rules.push(CrossFieldRule::RequiredUnless {
+            field: field.into(),
+            other: other.into(),
+            expected: expected.into(),
+            custom_message: None,
+        });
+        self
+    }
+
+    /// Asserts that `field` is present and non-null when ALL fields in `others` are present and non-null.
+    #[must_use]
+    pub fn required_with_all(mut self, field: impl Into<String>, others: &[&str]) -> Self {
+        self.cross_rules.push(CrossFieldRule::RequiredWithAll {
+            field: field.into(),
+            others: others.iter().map(|s| (*s).to_string()).collect(),
+            custom_message: None,
+        });
+        self
+    }
+
+    /// Asserts that `field` is present and non-null when NONE of the fields in `others` are present.
+    #[must_use]
+    pub fn required_without_all(mut self, field: impl Into<String>, others: &[&str]) -> Self {
+        self.cross_rules.push(CrossFieldRule::RequiredWithoutAll {
+            field: field.into(),
+            others: others.iter().map(|s| (*s).to_string()).collect(),
+            custom_message: None,
+        });
+        self
+    }
+
+    /// Enforces that at least one of the specified fields is present and non-empty.
+    #[must_use]
+    pub fn at_least_one_of(mut self, fields: &[&str]) -> Self {
+        self.cross_rules.push(CrossFieldRule::AtLeastOneOf {
+            fields: fields.iter().map(|s| (*s).to_string()).collect(),
+            custom_message: None,
+        });
+        self
+    }
+
+    /// Enforces that exactly one of the specified fields is present and non-empty.
+    #[must_use]
+    pub fn exactly_one_of(mut self, fields: &[&str]) -> Self {
+        self.cross_rules.push(CrossFieldRule::ExactlyOneOf {
+            fields: fields.iter().map(|s| (*s).to_string()).collect(),
+            custom_message: None,
+        });
+        self
+    }
+
+    /// Enforces that the specified fields are mutually exclusive (at most one may be present and non-empty).
+    #[must_use]
+    pub fn mutually_exclusive(mut self, fields: &[&str]) -> Self {
+        self.cross_rules.push(CrossFieldRule::MutuallyExclusive {
+            fields: fields.iter().map(|s| (*s).to_string()).collect(),
+            custom_message: None,
+        });
+        self
+    }
+
+    /// Asserts that `{field}_confirmation` is present and matches `{field}`.
+    #[must_use]
+    pub fn confirmed(mut self, field: impl Into<String>) -> Self {
+        self.cross_rules.push(CrossFieldRule::Confirmed {
+            field: field.into(),
+            custom_message: None,
+        });
+        self
     }
 
     /// Validates the payload and decodes directly into a typed struct `T: DeserializeOwned`.
@@ -825,6 +1546,26 @@ impl Schema<Value> for ObjectSchema {
                 Err(errors)
             }
         })
+    }
+
+    fn to_json_schema_value(&self) -> Value {
+        let mut properties = serde_json::Map::new();
+        let mut required = Vec::new();
+        for name in &self.field_order {
+            if let Some(field_def) = self.fields.get(name) {
+                properties.insert(name.clone(), field_def.to_json_schema());
+                if !field_def.is_optional() {
+                    required.push(Value::String(name.clone()));
+                }
+            }
+        }
+        let mut schema_map = serde_json::Map::new();
+        schema_map.insert("type".to_string(), Value::String("object".to_string()));
+        schema_map.insert("properties".to_string(), Value::Object(properties));
+        if !required.is_empty() {
+            schema_map.insert("required".to_string(), Value::Array(required));
+        }
+        Value::Object(schema_map)
     }
 }
 

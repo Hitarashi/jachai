@@ -21,6 +21,10 @@ pub struct ArraySchema<S, T> {
     min_items: Option<usize>,
     max_items: Option<usize>,
     exact_items: Option<usize>,
+    subset_allowed: Option<Vec<String>>,
+    contains_items: Vec<Value>,
+    contains_all_items: Vec<Value>,
+    contains_any_items: Vec<Vec<Value>>,
     not_empty: bool,
     distinct: bool,
     bail_on_fail: bool,
@@ -40,6 +44,10 @@ where
             min_items: None,
             max_items: None,
             exact_items: None,
+            subset_allowed: None,
+            contains_items: Vec::new(),
+            contains_all_items: Vec::new(),
+            contains_any_items: Vec::new(),
             not_empty: false,
             distinct: false,
             bail_on_fail: false,
@@ -62,6 +70,27 @@ where
         self
     }
 
+    /// Enforces an inclusive range of elements `[min, max]`.
+    #[must_use]
+    pub fn range(self, min: usize, max: usize) -> Self {
+        self.min_items(min).max_items(max)
+    }
+
+    /// Enforces an inclusive range of elements `[min, max]`.
+    ///
+    /// Ergonomic alias for `range(min, max)`.
+    #[must_use]
+    pub fn between(self, min: usize, max: usize) -> Self {
+        self.range(min, max)
+    }
+
+    /// Enforces that all string elements in the array are a subset of `allowed`.
+    #[must_use]
+    pub fn subset_of(mut self, allowed: &[&str]) -> Self {
+        self.subset_allowed = Some(allowed.iter().map(|s| (*s).to_string()).collect());
+        self
+    }
+
     /// Enforces an exact number of elements.
     #[must_use]
     pub fn exact_items(mut self, length: usize) -> Self {
@@ -73,6 +102,27 @@ where
     #[must_use]
     pub fn not_empty(mut self) -> Self {
         self.not_empty = true;
+        self
+    }
+
+    /// Enforces that the array contains the specified value.
+    #[must_use]
+    pub fn contains(mut self, expected: impl Into<Value>) -> Self {
+        self.contains_items.push(expected.into());
+        self
+    }
+
+    /// Enforces that the array contains all of the specified values.
+    #[must_use]
+    pub fn contains_all(mut self, values: impl IntoIterator<Item = Value>) -> Self {
+        self.contains_all_items.extend(values);
+        self
+    }
+
+    /// Enforces that the array contains at least one of the specified values.
+    #[must_use]
+    pub fn contains_any(mut self, values: impl IntoIterator<Item = Value>) -> Self {
+        self.contains_any_items.push(values.into_iter().collect());
         self
     }
 
@@ -188,6 +238,62 @@ where
                         return Err(errors);
                     }
                     break;
+                }
+            }
+        }
+
+        if let Some(ref allowed) = self.subset_allowed {
+            for item in items {
+                let item_str = match item {
+                    Value::String(s) => Some(s.as_str()),
+                    _ => None,
+                };
+                let is_allowed = item_str.is_some_and(|val| allowed.iter().any(|a| a == val));
+                if !is_allowed {
+                    let mut params = RuleParams::new();
+                    params.insert("allowed", allowed.join(", "));
+                    errors.push(rule_ctx.create_issue("subset_of", params, inline));
+                    if self.bail_on_fail {
+                        return Err(errors);
+                    }
+                    break;
+                }
+            }
+        }
+
+        for expected in &self.contains_items {
+            if !items.iter().any(|item| item == expected) {
+                let mut params = RuleParams::new();
+                params.insert("expected", expected.to_string());
+                errors.push(rule_ctx.create_issue("contains", params, inline));
+                if self.bail_on_fail {
+                    return Err(errors);
+                }
+            }
+        }
+
+        if !self.contains_all_items.is_empty() {
+            let missing = self
+                .contains_all_items
+                .iter()
+                .any(|expected| !items.iter().any(|item| item == expected));
+            if missing {
+                errors.push(rule_ctx.create_issue("contains_all", RuleParams::new(), inline));
+                if self.bail_on_fail {
+                    return Err(errors);
+                }
+            }
+        }
+
+        for any_group in &self.contains_any_items {
+            if !any_group.is_empty()
+                && !any_group
+                    .iter()
+                    .any(|expected| items.iter().any(|item| item == expected))
+            {
+                errors.push(rule_ctx.create_issue("contains_any", RuleParams::new(), inline));
+                if self.bail_on_fail {
+                    return Err(errors);
                 }
             }
         }
@@ -315,6 +421,62 @@ where
                 }
             }
 
+            if let Some(ref allowed) = self.subset_allowed {
+                for item in items {
+                    let item_str = match item {
+                        Value::String(s) => Some(s.as_str()),
+                        _ => None,
+                    };
+                    let is_allowed = item_str.is_some_and(|val| allowed.iter().any(|a| a == val));
+                    if !is_allowed {
+                        let mut params = RuleParams::new();
+                        params.insert("allowed", allowed.join(", "));
+                        errors.push(rule_ctx.create_issue("subset_of", params, inline));
+                        if self.bail_on_fail {
+                            return Err(errors);
+                        }
+                        break;
+                    }
+                }
+            }
+
+            for expected in &self.contains_items {
+                if !items.iter().any(|item| item == expected) {
+                    let mut params = RuleParams::new();
+                    params.insert("expected", expected.to_string());
+                    errors.push(rule_ctx.create_issue("contains", params, inline));
+                    if self.bail_on_fail {
+                        return Err(errors);
+                    }
+                }
+            }
+
+            if !self.contains_all_items.is_empty() {
+                let missing = self
+                    .contains_all_items
+                    .iter()
+                    .any(|expected| !items.iter().any(|item| item == expected));
+                if missing {
+                    errors.push(rule_ctx.create_issue("contains_all", RuleParams::new(), inline));
+                    if self.bail_on_fail {
+                        return Err(errors);
+                    }
+                }
+            }
+
+            for any_group in &self.contains_any_items {
+                if !any_group.is_empty()
+                    && !any_group
+                        .iter()
+                        .any(|expected| items.iter().any(|item| item == expected))
+                {
+                    errors.push(rule_ctx.create_issue("contains_any", RuleParams::new(), inline));
+                    if self.bail_on_fail {
+                        return Err(errors);
+                    }
+                }
+            }
+
             let mut validated_items = Vec::with_capacity(items.len());
             for (index, item) in items.iter().enumerate() {
                 let item_path = if path.is_empty() {
@@ -344,5 +506,28 @@ where
                 Err(errors)
             }
         })
+    }
+
+    fn to_json_schema_value(&self) -> Value {
+        let mut map = serde_json::Map::new();
+        map.insert("type".to_string(), Value::String("array".to_string()));
+        map.insert(
+            "items".to_string(),
+            self.element_schema.to_json_schema_value(),
+        );
+        if let Some(min) = self.min_items {
+            map.insert("minItems".to_string(), Value::Number(min.into()));
+        }
+        if let Some(max) = self.max_items {
+            map.insert("maxItems".to_string(), Value::Number(max.into()));
+        }
+        if let Some(exact) = self.exact_items {
+            map.insert("minItems".to_string(), Value::Number(exact.into()));
+            map.insert("maxItems".to_string(), Value::Number(exact.into()));
+        }
+        if self.distinct {
+            map.insert("uniqueItems".to_string(), Value::Bool(true));
+        }
+        Value::Object(map)
     }
 }
